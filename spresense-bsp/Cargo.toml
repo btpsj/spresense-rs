@@ -9,16 +9,18 @@ license = "BSD-3-Clause"
 cxd56-hal          = { version = "0.1.0", path = "../cxd56-hal" }
 cxd56-pac-svd2rust = { version = "0.1.0", path = "../cxd56-pac-svd2rust", features = ["critical-section"] }
 embedded-hal       = "1.0.0"
-hts221 = { version = "0.3.0", optional = true }
-lis2mdl-rs = { version = "2.0.0", optional = true }
-lps22hh-rs = { version = "2.0.0", optional = true }
-lsm6dsox = { version = "2.1.0", optional = true }
-sgp40 = "1.0.0"
+hts221      = { version = "0.3.0", optional = true }
+lis2mdl-rs  = { version = "2.0.0", optional = true }
+lps22hh-rs  = { version = "2.0.0", optional = true, features = ["blocking"] }
+lsm6dsox    = { version = "2.1.0", optional = true }
+sgp40       = "1.0.0"
+st-mems-bus = { version = "2.0.0", optional = true, default-features = false, features = ["i2c"] }
 
 [features]
-default = []
-rt      = ["cxd56-pac-svd2rust/rt"]
-lsm6dsox = ["dep:lsm6dsox"]
-lis2mdl-rs = ["dep:lis2mdl-rs"]
-hts221 = ["dep:hts221"]
-lps22hh-rs = ["dep:lps22hh-rs"]
+default      = []
+rt           = ["cxd56-pac-svd2rust/rt"]
+common-sense = []
+lsm6dsox     = ["dep:lsm6dsox",   "common-sense"]
+lis2mdl-rs   = ["dep:lis2mdl-rs", "common-sense"]
+hts221       = ["dep:hts221",     "common-sense"]
+pressure     = ["dep:lps22hh-rs", "dep:st-mems-bus", "common-sense"]

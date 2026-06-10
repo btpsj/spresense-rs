@@ -1,6 +1,8 @@
 #![no_std]
 
 pub mod led;
+#[cfg(feature = "pressure")]
+pub mod pressure;
 
 pub use cxd56_hal::gpio::Level;
 pub use led::Led;
