@@ -3,6 +3,8 @@
 pub mod led;
 #[cfg(feature = "pressure")]
 pub mod pressure;
+#[cfg(feature = "magnet")]
+pub mod magnet;
 
 pub use cxd56_hal::gpio::Level;
 pub use led::Led;
