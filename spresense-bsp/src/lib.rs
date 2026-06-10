@@ -1,10 +1,13 @@
 #![no_std]
 
 pub mod led;
+
 #[cfg(feature = "pressure")]
 pub mod pressure;
 #[cfg(feature = "magnet")]
 pub mod magnet;
+#[cfg(feature = "rg-led")]
+pub mod rg_led;
 
 pub use cxd56_hal::gpio::Level;
 pub use led::Led;
