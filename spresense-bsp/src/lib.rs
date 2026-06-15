@@ -2,6 +2,8 @@
 
 pub mod led;
 
+#[cfg(feature = "motion")]
+pub mod motion;
 #[cfg(feature = "pressure")]
 pub mod pressure;
 #[cfg(feature = "magnet")]
