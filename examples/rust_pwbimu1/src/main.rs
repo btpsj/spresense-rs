@@ -25,13 +25,13 @@ use panic_halt as _;
 
 use cxd56_hal::{
     clocks::{Config, RccExt},
-    delay_alt::Delay,
+    delay::Delay,
     gpio::{pins::Parts, Level, Output},
-    i2c_alt::{I2c, I2c0Pins, I2cConfig},
+    i2c::{I2c, I2c0Pins, I2cConfig},
     pac,
     pac::topreg::GpI2s1Bck,
-    spi_alt::{Spi, Spi5Pins, SpiConfig},
-    uart_alt::{Uart, Uart1Pins},
+    spi::{Spi, Spi5Pins, SpiConfig},
+    uart::{Uart, Uart1Pins},
 };
 
 use spresense_bsp::pwbimu::{self, AccelRange, GyroRange, Odr};

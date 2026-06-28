@@ -19,12 +19,12 @@ use cortex_m::Peripherals as CorePeripherals;
 use cortex_m_rt::entry;
 use panic_halt as _;
 
-use cxd56_hal::delay_alt::Delay;
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::delay::Delay;
+use cxd56_hal::uart::{Uart, Uart1Pins};
 use cxd56_hal::{
     clocks::{Config, RccExt},
     gpio::pins::Parts,
-    i2c_alt::{I2c as HalI2c, I2c0Pins, I2cConfig},
+    i2c::{I2c as HalI2c, I2c0Pins, I2cConfig},
     pac,
 };
 

@@ -29,11 +29,12 @@ use panic_probe as _;
 use static_cell::StaticCell;
 
 use cxd56_hal::clocks::{Clock, Config, RccExt};
+use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::multicore::Mailbox;
 use cxd56_hal::pac;
-use cxd56_hal::uart::{Uart1, UartConfig};
+use cxd56_hal::uart::{Uart, Uart1Pins, UartConfig};
 
-static SERIAL: StaticCell<Uart1> = StaticCell::new();
+static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 
 /// `APP_CKSEL` lives in topreg_sub (offset 0x418); read raw like `buses.rs`.
 const APP_CKSEL_ADDR: usize = 0x0410_3418;
@@ -191,7 +192,9 @@ fn main() -> ! {
     // --- Report: build the console from the *current* live clock (correct baud
     //     wherever we ended up), then print everything. -------------------------
     let now = clock.freeze();
-    let uart1 = Uart1::new(dp.uart1, &now, UartConfig::default()).expect("uart1 init failed");
+    let parts = Parts::new(dp.topreg);
+    let uart1_pins = Uart1Pins { tx: parts.gp_spi0_cs_x, rx: parts.gp_spi0_sck };
+    let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), &clock).expect("uart1 init failed");
     defmt_serial::defmt_serial(SERIAL.init(uart1));
 
     defmt::println!(

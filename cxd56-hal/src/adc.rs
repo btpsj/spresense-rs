@@ -105,7 +105,7 @@ pub trait AdcPeriph: sealed::Sealed {
 /// Kind-marker for the Low-Power ADC block.
 ///
 /// Pass as the first argument to [`Adc::new`]; `T` is then inferred without a
-/// turbofish (mirroring the `i2c_alt` token-inference pattern).
+/// turbofish (mirroring the `i2c` token-inference pattern).
 pub struct LpAdc;
 
 impl sealed::Sealed for LpAdc {

@@ -172,15 +172,15 @@ impl Clock {
     /// Re-sample the perf-dependent fields after an operation that changes
     /// them (operating-point change, gear rewrite).
     ///
-    /// Besides the APP-domain clocks, the SYSIOP-tree clocks move with the
-    /// voltage mode too — the operating point reconfigures SYSPLL and the SYS
-    /// dividers (User Manual SYSIOP-825/826 & UART-791/792: COM 48.75 MHz HP →
-    /// 32.5 MHz LP). They are all [`Dyn`] for exactly this reason: a peripheral
-    /// built from one (e.g. an `uart_alt` UART1, whose baud divisor is computed
-    /// from `self.com`) borrows the `Clock`, so it cannot still be alive — using
-    /// a stale rate — when this refresh runs. The always-on/sensor clocks
-    /// (`xosc`/`rcosc`/`rtc`/`scu`/`hpadc`/`lpadc`) are genuinely perf-invariant
-    /// and need no refresh.
+    /// Besides the [`Dyn`] APP-domain clocks, the SYSIOP-tree clocks move with
+    /// the voltage mode too — the operating point reconfigures SYSPLL and the
+    /// SYS dividers (User Manual SYSIOP-825/826 & UART-791/792: COM 48.75 MHz HP
+    /// → 32.5 MHz LP). They are typed [`Fixed`] for ergonomics but are *not*
+    /// perf-invariant, so refresh their cached snapshots here; otherwise a
+    /// freshly-built COM-bus peripheral (e.g. a `uart` UART1, whose baud
+    /// divisor is computed from `self.com`) would use the stale boot rate after
+    /// a perf change. The always-on/sensor clocks (`xosc`/`rcosc`/`rtc`/`scu`/
+    /// `hpadc`/`lpadc`) are genuinely perf-invariant and need no refresh.
     fn resample_dyn(&mut self) {
         let c = Clocks::sample(self.crg.cfg);
         // Perf-dependent SYSIOP-tree clocks (`gps_*` derive from `sys`,

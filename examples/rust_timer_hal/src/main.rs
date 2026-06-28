@@ -37,7 +37,7 @@ use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::interrupt as intc;
 use cxd56_hal::pac::{self, interrupt};
 use cxd56_hal::timer::{self, Prescaler, Timer};
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::uart::{Uart, Uart1Pins};
 
 /// Ticks counted by the TIMER0 ISR, read by `main`.
 static TICKS: AtomicU32 = AtomicU32::new(0);

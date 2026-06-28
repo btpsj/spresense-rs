@@ -29,11 +29,10 @@ fn main() -> ! {
     // the perf-dependent CPU base clock, so we need the `Clock` (not a `Clocks`
     // snapshot) to construct the watchdog.
     let clock = pac.crg.constrain(Config::default()).into_clock();
-    let clocks = clock.freeze();
 
     let pins = pins::Parts::new(pac.topreg);
     let mut led = pins.gp_i2s1_bck.into_output(Level::Low); // LED0
-    let mut delay = Delay::new(core.SYST, &clocks);
+    let mut delay = Delay::new(core.SYST, &clock);
 
     // 4-second watchdog. Borrowing `clock` keeps `request_perf` locked out for
     // the watchdog's lifetime, so the computed timeout cannot go stale.

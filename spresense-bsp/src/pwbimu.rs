@@ -795,10 +795,10 @@ impl ImuSample {
 // host-agnostic; only this section knows about the CXD56.
 
 use cxd56_hal::gpio::{GpioPin, Input, Level, Output};
-use cxd56_hal::i2c_alt::I2c as HalI2c;
+use cxd56_hal::i2c::I2c as HalI2c;
 use cxd56_hal::pac::topreg::{GpEmmcData2, GpEmmcData3, GpI2s0Bck, GpI2s0DataIn};
 use cxd56_hal::pac::{I2c0, Spi5};
-use cxd56_hal::spi_alt::Spi as HalSpi;
+use cxd56_hal::spi::Spi as HalSpi;
 
 /// A [`Pwbimu`] wired to the Spresense add-on's direct connection: I2C0 + SPI5
 /// and the fixed add-on GPIOs. Build one with [`spresense`].

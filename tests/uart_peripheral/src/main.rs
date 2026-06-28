@@ -23,9 +23,9 @@ use static_cell::StaticCell;
 
 use cxd56_hal::{
     clocks::{Clock, Config, RccExt},
-    uart_alt::{Uart, Uart2Pins, UartConfig},
+    uart::{Uart, Uart2Pins, UartConfig},
 };
-use cxd56_hal::{gpio::pins::Parts, pac, uart_alt::Uart1Pins};
+use cxd56_hal::{gpio::pins::Parts, pac, uart::Uart1Pins};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 // UART1 now borrows the `Clock` for its lifetime (COM is a Dyn clock), so the

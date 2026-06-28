@@ -10,14 +10,14 @@ use panic_halt as _;
 
 use cxd56_blink_debug::{sos, strobe};
 use cxd56_hal::pac;
-use cxd56_hal::uart_alt::Uart;
+use cxd56_hal::uart::Uart;
 use cxd56_hal::{
     clocks::{Config, RccExt},
-    delay_alt::Delay,
+    delay::Delay,
 };
 use cxd56_hal::{
     gpio::{Level, pins::Parts},
-    uart_alt::Uart1Pins,
+    uart::Uart1Pins,
 };
 
 #[entry]

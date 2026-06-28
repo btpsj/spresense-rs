@@ -26,7 +26,7 @@
 #![no_main]
 
 use cortex_m_rt as _;
-use cxd56_hal::{pac, uart_alt::Uart};
+use cxd56_hal::{pac, uart::Uart};
 // reset handler that calls the defmt-test-generated `main`
 use defmt_serial as _;
 use panic_probe as _;
@@ -195,7 +195,7 @@ mod tests {
     use cxd56_hal::{
         clocks::{Config, RccExt},
         gpio::pins::Parts,
-        uart_alt::{Uart, Uart1Pins},
+        uart::{Uart, Uart1Pins},
     };
 
     /// Fixtures shared across tests.

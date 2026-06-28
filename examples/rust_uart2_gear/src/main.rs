@@ -23,11 +23,11 @@ use cortex_m_rt::entry;
 use embedded_hal::delay::DelayNs;
 use panic_halt as _;
 
-use cxd56_hal::{clocks::{Config, GearConfig, PeripheralId, RccExt}, uart_alt::UartConfig};
-use cxd56_hal::delay_alt::Delay;
+use cxd56_hal::{clocks::{Config, GearConfig, PeripheralId, RccExt}, uart::UartConfig};
+use cxd56_hal::delay::Delay;
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac;
-use cxd56_hal::uart_alt::{Uart, Uart1Pins, Uart2Pins};
+use cxd56_hal::uart::{Uart, Uart1Pins, Uart2Pins};
 
 #[entry]
 fn main() -> ! {

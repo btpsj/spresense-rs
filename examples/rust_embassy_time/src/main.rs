@@ -56,7 +56,7 @@ use cxd56_hal::clocks::{Config, RccExt};
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac::{self, interrupt};
 use cxd56_hal::time;
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::uart::{Uart, Uart1Pins};
 
 // Forward the active backing's timer interrupt(s) to the driver — the library cannot
 // define the vectors itself. RTC backing: the single alarm IRQ. SP804 backing: TIMER0

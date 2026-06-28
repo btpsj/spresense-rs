@@ -22,7 +22,7 @@
 //! # Usage
 //!
 //! ```no_run
-//! use cxd56_hal::spi_alt::{Spi, SpiConfig};
+//! use cxd56_hal::spi::{Spi, SpiConfig};
 //! use cxd56_hal::pac;
 //! use embedded_hal::spi::{SpiBus, MODE_0};
 //! use fugit::Hertz;
@@ -150,7 +150,7 @@ mod sealed {
     ///
     /// The `Deref` supertrait gives uniform register-block access — `&*spi`
     /// yields `&pac::spi4::RegisterBlock` regardless of which PAC token is
-    /// used (same mechanism as `i2c_alt.rs`).
+    /// used (same mechanism as `i2c.rs`).
     pub trait Sealed: Deref<Target = pac::spi4::RegisterBlock> {
         /// Clock-gate identifier used by [`PeripheralId::enable`] /
         /// [`PeripheralId::disable`].
@@ -512,7 +512,7 @@ fn spi5_unpinmux() {
 
 // Route EMMC_CLK/CMD/DATA0/DATA1 → SPI5 SCK/CS_X/MOSI/MISO (Func2).
 //
-// Pad settings follow the i2c0_pinmux style (i2c_alt.rs:127-137):
+// Pad settings follow the i2c0_pinmux style (i2c.rs:127-137):
 //   - All pads: lowemi (4 mA → 2 mA drive, reduces EMI at SPI frequencies).
 //   - MISO (DATA1): enzi set — enables the input receiver so the pad drives
 //     the SPI shift register. Output pads (SCK/CMD/DATA0) don't need enzi.

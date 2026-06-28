@@ -14,7 +14,7 @@ use panic_halt as _;
 use cxd56_hal::clocks::{Config, RccExt};
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac;
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::uart::{Uart, Uart1Pins};
 
 #[entry]
 fn main() -> ! {

@@ -53,7 +53,7 @@ use cxd56_hal::async_delay::{self, Delay};
 use cxd56_hal::clocks::{Config, Perf, RccExt};
 use cxd56_hal::gpio::{self, Level, Trigger, Wait, pins::Parts};
 use cxd56_hal::pac::{self, Interrupt, interrupt};
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::uart::{Uart, Uart1Pins};
 
 /// Baseline hold before arming an edge wait, via the public [`Delay`] — lets the
 /// driven level settle so the PMU detector's baseline is unambiguous. A wall-clock

@@ -30,7 +30,7 @@ use panic_probe as _;
 use static_cell::StaticCell;
 
 use cxd56_hal::clocks::Clock;
-use cxd56_hal::{pac, uart_alt::Uart};
+use cxd56_hal::{pac, uart::Uart};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 static CLOCK: StaticCell<Clock> = StaticCell::new();
@@ -46,8 +46,8 @@ mod tests {
     use cxd56_hal::clocks::{Config, RccExt};
     use cxd56_hal::gpio::pins::Parts;
     use cxd56_hal::pac;
-    use cxd56_hal::spi_alt::{Spi, Spi5Pins, SpiConfig};
-    use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+    use cxd56_hal::spi::{Spi, Spi5Pins, SpiConfig};
+    use cxd56_hal::uart::{Uart, Uart1Pins};
 
     struct State {
         clock: &'static cxd56_hal::clocks::Clock,

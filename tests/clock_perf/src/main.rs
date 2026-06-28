@@ -18,8 +18,8 @@
 //!   [1] hp_boot   — measured ≈ believed `cpu_baseclk` at boot (HP).
 //!   [2] lp        — measured ≈ believed after `request_perf(Lp)` (downshift took
 //!                   *and* the HAL's belief matches reality at LP).
-//!   [3] cache     — after `request_perf(Lp)`, the cached `clock.com()` (the Dyn
-//!                   COM clock `uart_alt` UART1 reads) equals live `freeze().com`
+//!   [3] cache     — after `request_perf(Lp)`, the cached `clock.com` (the `Fixed`
+//!                   field `uart` reads) equals live `freeze().com`
 //!                   (the `resample_dyn` refresh).
 //!   [4] hp_recover— measured ≈ believed back at HP (the LP→HP round-trip).
 //!   [5] changed   — LP `cpu_baseclk` is clearly below HP's (physical proof the
@@ -37,11 +37,12 @@ use panic_probe as _;
 use static_cell::StaticCell;
 
 use cxd56_hal::clocks::{Clock, Config, Perf, RccExt};
+use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac;
 use cxd56_hal::timer::{Prescaler, Timer};
-use cxd56_hal::uart::{Uart1, UartConfig};
+use cxd56_hal::uart::{Uart, Uart1Pins, UartConfig};
 
-static SERIAL: StaticCell<Uart1> = StaticCell::new();
+static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 
 const RTC_HZ: u64 = 32_768;
 const WINDOW_TICKS: u64 = RTC_HZ / 4; // 250 ms
@@ -109,8 +110,9 @@ fn main() -> ! {
     let (meas_hp2, _t) = measure(&clock, tok, &rtc);
 
     // --- Report over the restored-HP console. ---------------------------------
-    let live = clock.freeze();
-    let uart1 = Uart1::new(dp.uart1, &live, UartConfig::default()).expect("uart1 init failed");
+    let parts = Parts::new(dp.topreg);
+    let uart1_pins = Uart1Pins { tx: parts.gp_spi0_cs_x, rx: parts.gp_spi0_sck };
+    let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), &clock).expect("uart1 init failed");
     defmt_serial::defmt_serial(SERIAL.init(uart1));
 
     defmt::println!("clock_perf: request_perf operating-point round-trip (HP->LP->HP)");

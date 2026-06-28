@@ -16,12 +16,11 @@ fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
     let core = Peripherals::take().unwrap();
 
-    let crg = pac.crg.constrain(Config::default());
-    let clocks = crg.freeze();
+    let clock = pac.crg.constrain(Config::default()).into_clock();
 
     let pins = pins::Parts::new(pac.topreg);
     let mut led = pins.gp_i2s1_bck.into_output(Level::Low);
-    let mut delay = Delay::new(core.SYST, &clocks);
+    let mut delay = Delay::new(core.SYST, &clock);
 
     loop {
         led.set_high();

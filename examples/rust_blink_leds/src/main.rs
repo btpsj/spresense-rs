@@ -31,8 +31,7 @@ fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
     let core = Peripherals::take().unwrap();
 
-    let crg = pac.crg.constrain(Config::default());
-    let clocks = crg.freeze();
+    let clock = pac.crg.constrain(Config::default()).into_clock();
 
     // All four board LEDs are on the I2S1 pins; configure each as a low output.
     let pins = pins::Parts::new(pac.topreg);
@@ -41,7 +40,7 @@ fn main() -> ! {
     let mut led2 = pins.gp_i2s1_data_in.into_output(Level::Low);
     let mut led3 = pins.gp_i2s1_data_out.into_output(Level::Low);
 
-    let mut delay = Delay::new(core.SYST, &clocks);
+    let mut delay = Delay::new(core.SYST, &clock);
 
     // Walk LED0 → LED1 → LED2 → LED3 (the physical order across the board).
     let mut leds: [&mut dyn OutputPin<Error = Infallible>; 4] =

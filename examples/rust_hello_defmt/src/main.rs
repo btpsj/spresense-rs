@@ -10,13 +10,13 @@ use embedded_hal::delay::DelayNs;
 use panic_probe as _;
 use static_cell::StaticCell;
 
-use cxd56_hal::delay_alt::Delay;
+use cxd56_hal::delay::Delay;
 use cxd56_hal::gpio::Level;
 use cxd56_hal::pac;
 use cxd56_hal::{
     clocks::{Clock, Config, RccExt},
     gpio::pins::Parts,
-    uart_alt::{Uart, Uart1Pins},
+    uart::{Uart, Uart1Pins},
 };
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();

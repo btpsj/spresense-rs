@@ -14,10 +14,10 @@ use rust_burn_sine::sine::Model;
 
 use cxd56_hal::{
     clocks::{Config, RccExt},
-    delay_alt::Delay,
+    delay::Delay,
     gpio::pins::Parts,
     pac,
-    uart_alt::{Uart, Uart1Pins},
+    uart::{Uart, Uart1Pins},
 };
 
 type Backend = Flex;

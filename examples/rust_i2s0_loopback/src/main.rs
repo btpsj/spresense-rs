@@ -36,11 +36,11 @@ use fugit::ExtU32; // brings `.millis()` into scope
 use panic_halt as _;
 
 use cxd56_hal::clocks::{Config, RccExt};
-use cxd56_hal::delay_alt::Delay;
+use cxd56_hal::delay::Delay;
 use cxd56_hal::gpio::pins::Parts;
-use cxd56_hal::i2s_alt::{I2s, I2s0, I2s0Pins, I2sConfig};
+use cxd56_hal::i2s::{I2s, I2s0, I2s0Pins, I2sConfig};
 use cxd56_hal::pac;
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::uart::{Uart, Uart1Pins};
 use cxd56_hal::watchdog::Watchdog;
 
 /// Samples per period of the TX sine. At the 48 kHz frame rate that is a

@@ -2,7 +2,7 @@
 //!
 //! Brings up I2S0 — the first I2S port of the audio block, exposed on the
 //! Spresense main-board headers (JP1/JP2, Arduino D26/D25/D19/D18) — following
-//! the same conventions as [`crate::i2c_alt`]: generic over a sealed port
+//! the same conventions as [`crate::i2c`]: generic over a sealed port
 //! marker, consuming the four `gp_i2s0_*` GPIO pins and the [`pac::Audio`]
 //! token, and configured against a [`Clock`].
 //!
@@ -28,7 +28,7 @@
 //! board is the **external audio crystal** ([`AudMclk::Ext`]). That is a
 //! [`Fixed`](crate::clocks::Fixed) clock — it does not track `appsmp`, the
 //! quantity changed by [`Clock::request_perf`]. Master BCK/LRCK therefore stay
-//! correct across HP↔LP transitions, so (like [`crate::i2c_alt::I2c`]) there is
+//! correct across HP↔LP transitions, so (like [`crate::i2c::I2c`]) there is
 //! no need to hold a `&Clock` borrow after construction.
 
 use core::marker::PhantomData;
@@ -111,7 +111,7 @@ impl Default for I2sConfig {
 }
 
 /// BCK/LRCK pad rates read back from the I2S0 block — see
-/// [`I2s::frame_clocks`](crate::i2s_alt::I2s::frame_clocks).
+/// [`I2s::frame_clocks`](crate::i2s::I2s::frame_clocks).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FrameClocks {
     /// LRCK (word/frame clock) at the pad, in Hz.
@@ -406,7 +406,7 @@ impl<P: I2sPort> I2s<P> {
     /// Enable the audio MCLK domain, route the pads to I2S, and configure the
     /// port from `config`.
     ///
-    /// `clock` is taken to mirror the other `_alt` constructors and to require
+    /// `clock` is taken to mirror the other peripheral constructors and to require
     /// the clock tree to be brought up first; the I2S0 timing reference (audio
     /// MCLK) is [`Fixed`](crate::clocks::Fixed), so the borrow ends here and
     /// [`Clock::request_perf`] stays callable afterwards (no lifetime retained).

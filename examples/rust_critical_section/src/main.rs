@@ -36,13 +36,13 @@ use cortex_m_rt::entry;
 use embedded_hal::delay::DelayNs;
 use panic_halt as _;
 
-use cxd56_hal::{delay_alt::Delay, gpio::{Level, pins}};
+use cxd56_hal::{delay::Delay, gpio::{Level, pins}};
 use cxd56_hal::multicore::{Core, ack_boot, spawn};
 use cxd56_hal::pac;
-use cxd56_hal::uart_alt::Uart;
+use cxd56_hal::uart::Uart;
 use cxd56_hal::{
     clocks::{Config, RccExt},
-    uart_alt::Uart1Pins,
+    uart::Uart1Pins,
 };
 
 /// Number of increments each core performs. 100 000 per core → 200 000 total.

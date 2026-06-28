@@ -22,8 +22,8 @@ use embedded_hal::spi::{SpiBus, MODE_0};
 use fugit::Hertz;
 use panic_halt as _;
 
-use cxd56_hal::spi_alt::{Spi, Spi5Pins, SpiConfig};
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::spi::{Spi, Spi5Pins, SpiConfig};
+use cxd56_hal::uart::{Uart, Uart1Pins};
 use cxd56_hal::{
     clocks::{Config, RccExt},
     gpio::pins::Parts,

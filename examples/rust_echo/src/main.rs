@@ -9,7 +9,7 @@ use cxd56_hal::pac;
 use cxd56_hal::{
     clocks::{Config, RccExt},
     gpio::pins::Parts,
-    uart_alt::{Uart, Uart1Pins},
+    uart::{Uart, Uart1Pins},
 };
 
 // Read a single byte at a time from the uart and store it in the buf until we

@@ -20,7 +20,7 @@
 //! mux/gate is an APP-local control that NuttX programs with plain `modifyreg32`.
 //! On the Spresense main board the MCLK source is the **external audio crystal**
 //! ([`AudMclk::Ext`]), a fixed clock independent of [`Clock::request_perf`]
-//! ([`crate::clocks::Clock`]) — which is why [`crate::i2s_alt::I2s`] needs no
+//! ([`crate::clocks::Clock`]) — which is why [`crate::i2s::I2s`] needs no
 //! lifetime.
 
 use super::peripheral::ClockError;

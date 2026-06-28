@@ -7,13 +7,13 @@ use cortex_m_rt::entry;
 use embedded_hal::i2c::I2c;
 use panic_halt as _;
 
-use cxd56_hal::uart_alt::Uart;
+use cxd56_hal::uart::Uart;
 use cxd56_hal::{
     clocks::{Config, RccExt},
-    i2c_alt::I2c0Pins,
+    i2c::I2c0Pins,
 };
-use cxd56_hal::{gpio::pins::Parts, i2c_alt::I2c as HalI2c, uart_alt::Uart1Pins};
-use cxd56_hal::{i2c_alt::I2cConfig, pac};
+use cxd56_hal::{gpio::pins::Parts, i2c::I2c as HalI2c, uart::Uart1Pins};
+use cxd56_hal::{i2c::I2cConfig, pac};
 
 #[entry]
 fn main() -> ! {
