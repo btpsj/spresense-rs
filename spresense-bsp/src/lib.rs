@@ -2,6 +2,9 @@
 
 pub mod led;
 
+#[cfg(feature = "pwbimu")]
+pub mod pwbimu;
+
 pub use cxd56_hal::gpio::Level;
 pub use led::Led;
 

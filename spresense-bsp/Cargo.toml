@@ -17,6 +17,7 @@ sgp40 = "1.0.0"
 
 [features]
 default = []
+pwbimu = []
 rt      = ["cxd56-pac-svd2rust/rt"]
 lsm6dsox = ["dep:lsm6dsox"]
 lis2mdl-rs = ["dep:lis2mdl-rs"]

@@ -1,0 +1,23 @@
+[package]
+name = "rust_pwbimu1"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+cortex-m    = { version = "0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+cxd56-hal   = { path = "../../cxd56-hal", features = ["rt", "critical-section"] }
+spresense-bsp = { path = "../../spresense-bsp", features = ["pwbimu"] }
+embedded-hal = "1.0.0"
+panic-halt  = "1.0.0"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
