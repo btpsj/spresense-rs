@@ -43,12 +43,12 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --locked --release -p mkspk -p flash-writer -p cargo-spresense-flash
+        run: cargo build --locked --release -p mkspk -p flash-writer -p cargo-spresense-flash -p xtask
       - name: Test
         run: cargo test --locked --release -p mkspk -p flash-writer -p cargo-spresense-flash
       - name: Clippy (advisory)
         continue-on-error: true
-        run: cargo clippy --locked -p mkspk -p flash-writer -p cargo-spresense-flash -- -D warnings
+        run: cargo clippy --locked -p mkspk -p flash-writer -p cargo-spresense-flash -p xtask -- -D warnings
 
   # ---- root workspace: embedded library crates (no_std, thumb target) ----
   embedded-crates:
@@ -64,14 +64,14 @@ jobs:
       - name: Build (svd2rust PAC backend)
         run: >
           cargo build --locked --release --target $TARGET --workspace
-          --exclude mkspk --exclude flash-writer --exclude cargo-spresense-flash
+          --exclude mkspk --exclude flash-writer --exclude cargo-spresense-flash --exclude xtask
       - name: Build (chiptool PAC backend)
         run: cargo build --locked --release --target $TARGET -p cxd56-pac --no-default-features --features chiptool
       - name: Clippy (advisory)
         continue-on-error: true
         run: >
           cargo clippy --locked --target $TARGET --workspace
-          --exclude mkspk --exclude flash-writer --exclude cargo-spresense-flash -- -D warnings
+          --exclude mkspk --exclude flash-writer --exclude cargo-spresense-flash --exclude xtask -- -D warnings
 
   # ---- standalone example crates (each its own workspace) ----
   # No --locked: the standalone Cargo.lock files are not kept in lockstep with
