@@ -1,0 +1,11 @@
+# `cargo run` builds this test, flashes it, then runs it as a test: the harness
+# resets the board, decodes the defmt-test output, and exits 0/1/2.
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+runner = "cargo-spresense-flash spresense-flash --test"
+rustflags = [
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+[build]
+target = "thumbv7em-none-eabihf"
