@@ -751,6 +751,12 @@ impl<R: PinReg> InterruptInput<R> {
         self.irq
     }
 
+    /// The EXDEVICE slot index (0–11) allocated to this pin. Pass to
+    /// [`crate::sleep::boot::gpio_mask`] to enable cold-sleep wake on this pin.
+    pub fn slot(&self) -> u8 {
+        self.slot
+    }
+
     pub fn is_high(&self) -> bool {
         self.input.is_high()
     }

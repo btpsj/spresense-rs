@@ -1,0 +1,10 @@
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+# `cargo run` builds, flashes, then opens a serial monitor on the board's UART.
+# Requires: cargo install --path ../../tools/cargo-spresense-flash
+runner = "cargo-spresense-flash spresense-flash --monitor"
+rustflags = [
+  "-C", "link-arg=-Tlink.x",
+]
+
+[build]
+target = "thumbv7em-none-eabihf"

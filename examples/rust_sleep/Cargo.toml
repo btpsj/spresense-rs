@@ -1,0 +1,23 @@
+[package]
+name = "rust_sleep"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+cortex-m    = { version = "0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+# `async-delay-rtc` only satisfies the HAL's "exactly one async-time backend"
+# requirement; this example does not use async delays.
+cxd56-hal   = { path = "../../cxd56-hal", default-features = false, features = ["rt", "critical-section", "async-delay-rtc"] }
+panic-halt  = "1.0.0"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
