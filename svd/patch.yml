@@ -2307,6 +2307,25 @@ _add:
               - name: Func3
                 description: "Function 3"
                 value: 3
+          # GROUP_PWMA = bit offset 20 (cxd56_pinconfig.c:70).
+          # Selects mode for PWM0 and PWM1 pins together. Mode 1 = PWMA output.
+          PWMA:
+            description: "Mode select for PWM0 / PWM1 pins (PWMA = Func1)"
+            bitOffset: 20
+            bitWidth: 2
+            enumeratedValues:
+              - name: Gpio
+                description: "GPIO mode"
+                value: 0
+              - name: Func1
+                description: "Function 1 (PWM output)"
+                value: 1
+              - name: Func2
+                description: "Function 2"
+                value: 2
+              - name: Func3
+                description: "Function 3"
+                value: 3
 
       # IOCELL pin register for SPI0_CS_X (UART1 TXD when SPI0A=Func1).
       # CXD56_TOPREG_IO_SPI0_CS_X = CXD56_TOPREG_BASE + 0x0844.
@@ -2423,6 +2442,60 @@ _add:
       IO_I2C0_BDT:
         description: "IOCELL control for I2C0_BDT pad"
         addressOffset: 0x8b4
+        access: read-write
+        resetValue: 0x01010100
+        fields:
+          LOWEMI:
+            description: "Output current: 0=4mA(max 64MHz), 1=2mA(max 32MHz)"
+            bitOffset: 24
+            bitWidth: 1
+          PDN:
+            description: "Pulldown: 0=pulldown enabled, 1=normal (off)"
+            bitOffset: 16
+            bitWidth: 1
+          PUN:
+            description: "Pullup: 0=pullup enabled, 1=normal (off)"
+            bitOffset: 8
+            bitWidth: 1
+          ENZI:
+            description: "Input enable: 0=disabled, 1=enabled"
+            bitOffset: 0
+            bitWidth: 1
+
+      # IOCELL pin register for PWM0 output.
+      # CXD56_TOPREG_IO_PWM0 = CXD56_TOPREG_BASE + 0x08B8.
+      # Board pinconfig: mode=1 (PWMA Func1), input disabled, 4mA drive, HiZ pull.
+      # 4mA = LOWEMI=0; HiZ = PDN=1 (no pulldown), PUN=1 (no pullup).
+      # Write value: 0x00010100 = LOWEMI=0, PDN=1, PUN=1, ENZI=0.
+      IO_PWM0:
+        description: "IOCELL control for PWM0 output pad"
+        addressOffset: 0x8b8
+        access: read-write
+        resetValue: 0x01010100
+        fields:
+          LOWEMI:
+            description: "Output current: 0=4mA(max 64MHz), 1=2mA(max 32MHz)"
+            bitOffset: 24
+            bitWidth: 1
+          PDN:
+            description: "Pulldown: 0=pulldown enabled, 1=normal (off)"
+            bitOffset: 16
+            bitWidth: 1
+          PUN:
+            description: "Pullup: 0=pullup enabled, 1=normal (off)"
+            bitOffset: 8
+            bitWidth: 1
+          ENZI:
+            description: "Input enable: 0=disabled, 1=enabled"
+            bitOffset: 0
+            bitWidth: 1
+
+      # IOCELL pin register for PWM1 output.
+      # CXD56_TOPREG_IO_PWM1 = CXD56_TOPREG_BASE + 0x08BC.
+      # Same pad config as IO_PWM0.
+      IO_PWM1:
+        description: "IOCELL control for PWM1 output pad"
+        addressOffset: 0x8bc
         access: read-write
         resetValue: 0x01010100
         fields:
@@ -6741,3 +6814,98 @@ _add:
             description: "I2S1 AHB clock enable (1=enable)"
             bitOffset: 2
             bitWidth: 1
+
+  # PWM: 4-channel pulse-width modulator in the SCU domain.
+  # Base: PWM_REG_BASE = 0x04195600, PHASE_REG_BASE = 0x04195630.
+  # Source: nuttx/arch/arm/src/cxd56xx/cxd56_pwm.c
+  # Clock: SCU base clock (cxd56_get_pwm_baseclock -> cxd56_get_scu_baseclock).
+  # No dedicated interrupt — configuration is pure MMIO, no IRQ needed.
+  # CH0 main registers at 0x04195600 (+0x00/04/08), CH1 at 0x0419560C (+0x00/04/08).
+  # PHASE registers at 0x04195630 (CH0) and 0x04195634 (CH1), i.e. base+0x30/0x34.
+  # All registers covered by a single addressBlock size=0x40 at base 0x04195600.
+  PWM:
+    description: "4-channel PWM peripheral (SCU domain, channels 0-1 modeled)"
+    baseAddress: 0x04195600
+    addressBlock:
+      offset: 0x0
+      size: 0x38
+      usage: "registers"
+    registers:
+      CH0_PARAM:
+        description: "CH0 period and off-period (bits[15:0]=period, bits[31:16]=offperiod)"
+        addressOffset: 0x00
+        access: read-write
+        resetValue: 0x00000000
+        fields:
+          PERIOD:
+            description: "PWM cycle period count (16-bit counter, 1-65535)"
+            bitOffset: 0
+            bitWidth: 16
+          OFFPERIOD:
+            description: "Off-period (LOW time) count; on-period = PERIOD - OFFPERIOD"
+            bitOffset: 16
+            bitWidth: 16
+      CH0_EN:
+        description: "CH0 output enable"
+        addressOffset: 0x04
+        access: read-write
+        resetValue: 0x00000000
+        fields:
+          ENABLE:
+            description: "PWM output enable: 0=disabled (LOW), 1=enabled"
+            bitOffset: 0
+            bitWidth: 1
+      CH0_UPDATE:
+        description: "CH0 update trigger (write any value to apply PARAM changes)"
+        addressOffset: 0x08
+        access: write-only
+        resetValue: 0x00000000
+      CH1_PARAM:
+        description: "CH1 period and off-period"
+        addressOffset: 0x0c
+        access: read-write
+        resetValue: 0x00000000
+        fields:
+          PERIOD:
+            description: "PWM cycle period count"
+            bitOffset: 0
+            bitWidth: 16
+          OFFPERIOD:
+            description: "Off-period (LOW time) count"
+            bitOffset: 16
+            bitWidth: 16
+      CH1_EN:
+        description: "CH1 output enable"
+        addressOffset: 0x10
+        access: read-write
+        resetValue: 0x00000000
+        fields:
+          ENABLE:
+            description: "PWM output enable: 0=disabled (LOW), 1=enabled"
+            bitOffset: 0
+            bitWidth: 1
+      CH1_UPDATE:
+        description: "CH1 update trigger"
+        addressOffset: 0x14
+        access: write-only
+        resetValue: 0x00000000
+      CH0_PHASE:
+        description: "CH0 prescale (bits[31:16]=prescale 0-8; clock divisor = 2^prescale)"
+        addressOffset: 0x30
+        access: read-write
+        resetValue: 0x00000000
+        fields:
+          PRESCALE:
+            description: "Input clock prescaler exponent (0=÷1, 1=÷2, … 8=÷256)"
+            bitOffset: 16
+            bitWidth: 4
+      CH1_PHASE:
+        description: "CH1 prescale"
+        addressOffset: 0x34
+        access: read-write
+        resetValue: 0x00000000
+        fields:
+          PRESCALE:
+            description: "Input clock prescaler exponent"
+            bitOffset: 16
+            bitWidth: 4

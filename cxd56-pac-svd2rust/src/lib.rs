@@ -531,6 +531,15 @@ impl core::fmt::Debug for ScuAdcif {
 }
 ///SCU ADC Interface — LPADC/HPADC control and per-channel FIFO read ports. CPU APB read of LPADC_FIFO(n) dequeues one sample from the hardware FIFO of LPADC channel n (no iSoP needed). UM §3.21.12.1; Mirror base 0x0418DC00.
 pub mod scu_adcif;
+///4-channel PWM peripheral (SCU domain, channels 0-1 modeled)
+pub type Pwm = crate::Periph<pwm::RegisterBlock, 0x0419_5600>;
+impl core::fmt::Debug for Pwm {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.debug_struct("Pwm").finish()
+    }
+}
+///4-channel PWM peripheral (SCU domain, channels 0-1 modeled)
+pub mod pwm;
 ///Synchronous Serial Port Controller (IMG SPI)
 pub type Spi4 = crate::Periph<spi4::RegisterBlock, 0x0210_3400>;
 impl core::fmt::Debug for Spi4 {
@@ -639,6 +648,8 @@ pub struct Peripherals {
     pub i2c1: I2c1,
     ///SCU_ADCIF
     pub scu_adcif: ScuAdcif,
+    ///PWM
+    pub pwm: Pwm,
     ///SPI4
     pub spi4: Spi4,
     ///SPI5
@@ -695,6 +706,7 @@ impl Peripherals {
             i2c0: unsafe { I2c0::steal() },
             i2c1: unsafe { I2c1::steal() },
             scu_adcif: unsafe { ScuAdcif::steal() },
+            pwm: unsafe { Pwm::steal() },
             spi4: unsafe { Spi4::steal() },
             spi5: unsafe { Spi5::steal() },
             topreg: unsafe { Topreg::steal() },

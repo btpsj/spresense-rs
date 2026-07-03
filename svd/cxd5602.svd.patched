@@ -8170,6 +8170,134 @@
       </registers>
     </peripheral>
     <peripheral>
+      <name>PWM</name>
+      <description>4-channel PWM peripheral (SCU domain, channels 0-1 modeled)</description>
+      <baseAddress>0x04195600</baseAddress>
+      <addressBlock>
+        <offset>0x0</offset>
+        <size>0x38</size>
+        <usage>registers</usage>
+      </addressBlock>
+      <registers>
+        <register>
+          <name>CH0_PARAM</name>
+          <description>CH0 period and off-period (bits[15:0]=period, bits[31:16]=offperiod)</description>
+          <addressOffset>0x0</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x00000000</resetValue>
+          <fields>
+            <field>
+              <name>PERIOD</name>
+              <description>PWM cycle period count (16-bit counter, 1-65535)</description>
+              <bitOffset>0</bitOffset>
+              <bitWidth>16</bitWidth>
+            </field>
+            <field>
+              <name>OFFPERIOD</name>
+              <description>Off-period (LOW time) count; on-period = PERIOD - OFFPERIOD</description>
+              <bitOffset>16</bitOffset>
+              <bitWidth>16</bitWidth>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>CH0_EN</name>
+          <description>CH0 output enable</description>
+          <addressOffset>0x4</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x00000000</resetValue>
+          <fields>
+            <field>
+              <name>ENABLE</name>
+              <description>PWM output enable: 0=disabled (LOW), 1=enabled</description>
+              <bitOffset>0</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>CH0_UPDATE</name>
+          <description>CH0 update trigger (write any value to apply PARAM changes)</description>
+          <addressOffset>0x8</addressOffset>
+          <access>write-only</access>
+          <resetValue>0x00000000</resetValue>
+        </register>
+        <register>
+          <name>CH1_PARAM</name>
+          <description>CH1 period and off-period</description>
+          <addressOffset>0xC</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x00000000</resetValue>
+          <fields>
+            <field>
+              <name>PERIOD</name>
+              <description>PWM cycle period count</description>
+              <bitOffset>0</bitOffset>
+              <bitWidth>16</bitWidth>
+            </field>
+            <field>
+              <name>OFFPERIOD</name>
+              <description>Off-period (LOW time) count</description>
+              <bitOffset>16</bitOffset>
+              <bitWidth>16</bitWidth>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>CH1_EN</name>
+          <description>CH1 output enable</description>
+          <addressOffset>0x10</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x00000000</resetValue>
+          <fields>
+            <field>
+              <name>ENABLE</name>
+              <description>PWM output enable: 0=disabled (LOW), 1=enabled</description>
+              <bitOffset>0</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>CH1_UPDATE</name>
+          <description>CH1 update trigger</description>
+          <addressOffset>0x14</addressOffset>
+          <access>write-only</access>
+          <resetValue>0x00000000</resetValue>
+        </register>
+        <register>
+          <name>CH0_PHASE</name>
+          <description>CH0 prescale (bits[31:16]=prescale 0-8; clock divisor = 2^prescale)</description>
+          <addressOffset>0x30</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x00000000</resetValue>
+          <fields>
+            <field>
+              <name>PRESCALE</name>
+              <description>Input clock prescaler exponent (0=÷1, 1=÷2, … 8=÷256)</description>
+              <bitOffset>16</bitOffset>
+              <bitWidth>4</bitWidth>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>CH1_PHASE</name>
+          <description>CH1 prescale</description>
+          <addressOffset>0x34</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x00000000</resetValue>
+          <fields>
+            <field>
+              <name>PRESCALE</name>
+              <description>Input clock prescaler exponent</description>
+              <bitOffset>16</bitOffset>
+              <bitWidth>4</bitWidth>
+            </field>
+          </fields>
+        </register>
+      </registers>
+    </peripheral>
+    <peripheral>
       <name>SPI4</name>
       <version>1.0</version>
       <description>Synchronous Serial Port Controller (IMG SPI)</description>
@@ -10547,6 +10675,12 @@
               <bitOffset>8</bitOffset>
               <bitWidth>2</bitWidth>
             </field>
+            <field>
+              <name>PWMA</name>
+              <description>Mode select for PWM0 / PWM1 pins (PWMA = Func1)</description>
+              <bitOffset>20</bitOffset>
+              <bitWidth>2</bitWidth>
+            </field>
           </fields>
         </register>
         <register>
@@ -10685,6 +10819,72 @@
           <name>IO_I2C0_BDT</name>
           <description>IOCELL control for I2C0_BDT pad</description>
           <addressOffset>0x8B4</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x01010100</resetValue>
+          <fields>
+            <field>
+              <name>LOWEMI</name>
+              <description>Output current: 0=4mA(max 64MHz), 1=2mA(max 32MHz)</description>
+              <bitOffset>24</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+            <field>
+              <name>PDN</name>
+              <description>Pulldown: 0=pulldown enabled, 1=normal (off)</description>
+              <bitOffset>16</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+            <field>
+              <name>PUN</name>
+              <description>Pullup: 0=pullup enabled, 1=normal (off)</description>
+              <bitOffset>8</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+            <field>
+              <name>ENZI</name>
+              <description>Input enable: 0=disabled, 1=enabled</description>
+              <bitOffset>0</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>IO_PWM0</name>
+          <description>IOCELL control for PWM0 output pad</description>
+          <addressOffset>0x8B8</addressOffset>
+          <access>read-write</access>
+          <resetValue>0x01010100</resetValue>
+          <fields>
+            <field>
+              <name>LOWEMI</name>
+              <description>Output current: 0=4mA(max 64MHz), 1=2mA(max 32MHz)</description>
+              <bitOffset>24</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+            <field>
+              <name>PDN</name>
+              <description>Pulldown: 0=pulldown enabled, 1=normal (off)</description>
+              <bitOffset>16</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+            <field>
+              <name>PUN</name>
+              <description>Pullup: 0=pullup enabled, 1=normal (off)</description>
+              <bitOffset>8</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+            <field>
+              <name>ENZI</name>
+              <description>Input enable: 0=disabled, 1=enabled</description>
+              <bitOffset>0</bitOffset>
+              <bitWidth>1</bitWidth>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>IO_PWM1</name>
+          <description>IOCELL control for PWM1 output pad</description>
+          <addressOffset>0x8BC</addressOffset>
           <access>read-write</access>
           <resetValue>0x01010100</resetValue>
           <fields>
