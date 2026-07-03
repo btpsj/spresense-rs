@@ -37,7 +37,7 @@ The harness embeds `defmt-decoder`, so you do **not** need `socat`/`defmt-print`
 - The Sony bootloader/EULA must already be flashed (same prerequisite as the
   examples).
 
-## The two tests
+## The tests
 
 ### 1. `uart_peripheral/` — UART peripheral (plain `defmt`, Option 1)
 
@@ -71,6 +71,42 @@ cargo test --release --test gpio                  # cargo test exit status refle
 
 (It's a test, not a `run`, because `defmt-test` only emits its entry point under
 `cfg(test)`.)
+
+### 3. `spi_loopback/` — SPI5 loopback (`defmt-test`)
+
+Two test cases: an internal loopback (no wiring, `SSPCR1.LBM = 1`) and an
+external pad loopback (feature-gated).
+
+```
+cd tests/spi_loopback
+cargo test --release --test spi                            # internal LBM only
+cargo test --release --test spi --features external-loopback # + MOSI↔MISO jumper
+```
+
+External wiring: **JP2 pin 9 (MOSI / D16) ↔ JP2 pin 8 (MISO / D17)** — 1.8 V pads.
+
+### 4. `i2s_loopback/` — I2S0 loopback (`defmt-test`)
+
+Two test cases: a clock-register sanity check (no wiring; requires the CXD5247
+audio companion to be present) and a full-duplex sine-tone loopback (feature-gated).
+
+The audio bring-up (CXD5247 power-on, 24.576 MHz MCLK oscillator, I2S0 master
+at 48 kHz) happens once in `#[init]`. A watchdog is armed during init so a
+missing CXD5247 produces a visible reboot loop rather than a silent hang.
+
+```
+cd tests/i2s_loopback
+cargo test --release --test i2s                            # clock_sanity only
+cargo test --release --test i2s --features external-loopback # + sine loopback
+```
+
+External wiring: **JP2 pin 7 (DATA_OUT / D18) ↔ JP2 pin 6 (DATA_IN / D19)** —
+adjacent pins, 1.8 V. BCK (D26) and LRCK (D25) are free for a scope.
+
+The loopback check uses autocorrelation rather than bit-exact comparison because
+the RX DMA is sourced from the audio block's `SRC1` sample-rate converter, which
+filters DC and rings on step edges. Energy + periodicity at the tone period proves
+the signal made the round trip regardless of SRC gain or phase distortion.
 
 ## Writing more tests
 
