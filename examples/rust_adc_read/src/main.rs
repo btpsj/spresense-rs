@@ -48,7 +48,7 @@ fn main() -> ! {
     let crg = dp.crg.constrain(Config::default());
     let clock = crg.into_clock();
 
-    // UART1 for console output. COM clock is Fixed → Uart<'static, Uart1>.
+    // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
     let parts = Parts::new(dp.topreg);
     let uart1_pins = Uart1Pins { tx: parts.gp_spi0_cs_x, rx: parts.gp_spi0_sck };
     let mut uart = Uart::new(dp.uart1, uart1_pins, Default::default(), &clock)

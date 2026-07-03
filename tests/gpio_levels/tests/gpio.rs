@@ -39,6 +39,9 @@ use cxd56_hal::pac::{Interrupt, interrupt};
 // `defmt-test` owns the module body, so keep the logger cell at crate root and
 // reach it via `crate::SERIAL`.
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
+// UART1 now borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
+// `Clock` must outlive the `'static` UART stored in `SERIAL`.
+static CLOCK: StaticCell<cxd56_hal::clocks::Clock> = StaticCell::new();
 
 /// In-`join` pacing for the loopback driver: wait this many RTC ticks before
 /// driving the edge, so the concurrent `wait_for_*_edge` has finished arming first
@@ -210,22 +213,24 @@ mod tests {
     #[init]
     fn init() -> State {
         let pac = pac::Peripherals::take().unwrap();
-        let clock = pac.crg.constrain(Config::default()).into_clock();
+        // Promote the clock to `'static` so the UART1 console (which borrows it)
+        // can be stored in the `'static` `SERIAL` cell.
+        let clock = crate::CLOCK.init(pac.crg.constrain(Config::default()).into_clock());
 
         // Sample the async-delay source's input clock and open its interrupt path.
         // Backing-agnostic: a no-op beyond opening the gate for the perf-invariant
         // RTC backing, but *required* for the SP804 timer backing (it samples the
         // CPU base clock the edge-arm settle's one-shot counts at) — the tests use
         // only the free-function settle path, never a `Delay` handle.
-        crate::async_delay::init(&clock);
+        crate::async_delay::init(clock);
 
-        // UART1 for console output. COM clock is Fixed → Uart<'static, Uart1>.
+        // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
         let parts = Parts::new(pac.topreg);
         let uart1_pins = Uart1Pins {
             tx: parts.gp_spi0_cs_x,
             rx: parts.gp_spi0_sck,
         };
-        let uart = Uart::new(pac.uart1, uart1_pins, Default::default(), &clock)
+        let uart = Uart::new(pac.uart1, uart1_pins, Default::default(), clock)
             .expect("uart1 init failed");
 
         defmt_serial::defmt_serial(crate::SERIAL.init(uart));

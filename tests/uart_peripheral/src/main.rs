@@ -28,6 +28,9 @@ use cxd56_hal::{
 use cxd56_hal::{gpio::pins::Parts, pac, uart_alt::Uart1Pins};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
+// UART1 now borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
+// `Clock` must outlive the `'static` UART stored in `SERIAL`.
+static CLOCK: StaticCell<Clock> = StaticCell::new();
 
 /// Transmit one byte and read it straight back (loopback), asserting a match.
 fn echo_byte(uart: &mut Uart<'_, pac::Uart2>, expect: u8) -> Result<(), &'static str> {
@@ -93,9 +96,11 @@ fn uart2_external_loopback(
 fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
     let crg = pac.crg.constrain(Config::default());
-    let clock = crg.into_clock();
+    // Promote the clock to `'static` so the UART1 console (which borrows it)
+    // can be stored in the `'static` `SERIAL` cell.
+    let clock = CLOCK.init(crg.into_clock());
 
-    // UART1 for console output. COM clock is Fixed → Uart<'static, Uart1>.
+    // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
     let parts = Parts::new(pac.topreg);
     let uart1_pins = Uart1Pins {
         tx: parts.gp_spi0_cs_x,
@@ -106,7 +111,7 @@ fn main() -> ! {
         rx: parts.gp_uart2_rxd,
     };
     let uart =
-        Uart::new(pac.uart1, uart1_pins, Default::default(), &clock).expect("uart1 init failed");
+        Uart::new(pac.uart1, uart1_pins, Default::default(), clock).expect("uart1 init failed");
 
     defmt_serial::defmt_serial(crate::SERIAL.init(uart));
 
@@ -117,7 +122,7 @@ fn main() -> ! {
     defmt::println!("[1/3] console_uart1: PASS (UART1 console up, defmt-serial logging)");
 
     // [2/3] UART2 internal loopback (no wiring).
-    match uart2_internal_loopback(pac.uart2, uart2_pins, &clock) {
+    match uart2_internal_loopback(pac.uart2, uart2_pins, clock) {
         Ok(()) => defmt::println!("[2/3] uart2_internal_loopback: PASS"),
         Err(e) => {
             all_ok = false;
@@ -137,7 +142,7 @@ fn main() -> ! {
             tx: parts.gp_uart2_txd,
             rx: parts.gp_uart2_rxd,
         };
-        match uart2_external_loopback(uart2, uart2_pins, &clock) {
+        match uart2_external_loopback(uart2, uart2_pins, clock) {
             Ok(()) => defmt::println!("[3/3] uart2_external_loopback: PASS"),
             Err(e) => {
                 all_ok = false;

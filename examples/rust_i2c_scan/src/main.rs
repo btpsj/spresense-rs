@@ -21,7 +21,7 @@ fn main() -> ! {
     let crg = pac.crg.constrain(Config::default());
     let clock = crg.into_clock();
 
-    // UART1 for console output. COM clock is Fixed → Uart<'static, Uart1>.
+    // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
     let parts = Parts::new(pac.topreg);
     let uart1_pins = Uart1Pins {
         tx: parts.gp_spi0_cs_x,

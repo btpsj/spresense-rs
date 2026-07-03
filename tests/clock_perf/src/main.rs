@@ -18,8 +18,8 @@
 //!   [1] hp_boot   — measured ≈ believed `cpu_baseclk` at boot (HP).
 //!   [2] lp        — measured ≈ believed after `request_perf(Lp)` (downshift took
 //!                   *and* the HAL's belief matches reality at LP).
-//!   [3] cache     — after `request_perf(Lp)`, the cached `clock.com` (the `Fixed`
-//!                   field `uart_alt` reads) equals live `freeze().com`
+//!   [3] cache     — after `request_perf(Lp)`, the cached `clock.com()` (the Dyn
+//!                   COM clock `uart_alt` UART1 reads) equals live `freeze().com`
 //!                   (the `resample_dyn` refresh).
 //!   [4] hp_recover— measured ≈ believed back at HP (the LP→HP round-trip).
 //!   [5] changed   — LP `cpu_baseclk` is clearly below HP's (physical proof the
@@ -97,7 +97,7 @@ fn main() -> ! {
     // -> LP. request_perf drives the full multi-step handshake; resample_dyn
     // refreshes the cached COM the console will be sized from.
     clock.request_perf(Perf::Lp).expect("request_perf(Lp) failed");
-    let cached_com_lp = clock.com.hz().to_Hz();
+    let cached_com_lp = clock.com().hz().to_Hz();
     let live_com_lp = clock.freeze().com.to_Hz();
     let believed_lp = clock.cpu_baseclk().to_Hz();
     let (meas_lp, t) = measure(&clock, tok, &rtc);

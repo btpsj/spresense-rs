@@ -14,12 +14,15 @@ use cxd56_hal::delay_alt::Delay;
 use cxd56_hal::gpio::Level;
 use cxd56_hal::pac;
 use cxd56_hal::{
-    clocks::{Config, RccExt},
+    clocks::{Clock, Config, RccExt},
     gpio::pins::Parts,
     uart_alt::{Uart, Uart1Pins},
 };
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
+// UART1 now borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
+// `Clock` must outlive the `'static` UART stored in `SERIAL`.
+static CLOCK: StaticCell<Clock> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
@@ -27,19 +30,21 @@ fn main() -> ! {
     let core = Peripherals::take().unwrap();
 
     let crg = pac.crg.constrain(Config::default());
-    let clock = crg.into_clock();
+    // Promote the clock to `'static` so the UART1 console (which borrows it)
+    // can be stored in the `'static` `SERIAL` cell.
+    let clock = CLOCK.init(crg.into_clock());
 
-    // UART1 for console output. COM clock is Fixed → Uart<'static, Uart1>.
+    // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
     let parts = Parts::new(pac.topreg);
     let uart1_pins = Uart1Pins {
         tx: parts.gp_spi0_cs_x,
         rx: parts.gp_spi0_sck,
     };
     let uart =
-        Uart::new(pac.uart1, uart1_pins, Default::default(), &clock).expect("uart1 init failed");
+        Uart::new(pac.uart1, uart1_pins, Default::default(), clock).expect("uart1 init failed");
 
     let mut led = parts.gp_i2s1_bck.into_output(Level::Low);
-    let mut delay = Delay::new(core.SYST, &clock);
+    let mut delay = Delay::new(core.SYST, clock);
 
     sos(&mut led, &mut delay);
 

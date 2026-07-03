@@ -207,8 +207,9 @@ pub trait UartPeriph: sealed::Sealed {
     /// The type returned by [`Uart::new`] and how its lifetime relates to the
     /// [`Clock`] borrow:
     ///
-    /// - `pac::Uart1`: `Output<'clk> = Uart<'static, pac::Uart1>` — COM is a
-    ///   Fixed clock; the borrow of `Clock` ends at `new`, pinning nothing.
+    /// - `pac::Uart1`: `Output<'clk> = Uart<'clk, pac::Uart1>` — COM is a Dyn
+    ///   clock that tracks the operating point; the UART borrows `Clock` for
+    ///   `'clk`, blocking [`Clock::request_perf`] until dropped.
     /// - `pac::Uart2`: `Output<'clk> = Uart<'clk, pac::Uart2>` — IMG_UART is
     ///   a Dyn clock; the UART borrows `Clock` for `'clk`, blocking
     ///   [`Clock::request_perf`] until dropped.
@@ -257,14 +258,14 @@ impl sealed::Sealed for pac::Uart1 {
     }
 
     fn base_hz(clock: &Clock) -> Hertz<u32> {
-        clock.com.hz()
+        clock.com().hz()
     }
 }
 impl UartPeriph for pac::Uart1 {
-    // COM is Fixed/Copy — Output<'clk> = Uart<'static, _>; 'clk is unused in
-    // the returned value (the PhantomData marker is 'static). The Clock borrow
-    // ends at the call site, pinning nothing.
-    type Output<'clk> = Uart<'static, pac::Uart1>;
+    // COM is Dyn — Output<'clk> = Uart<'clk, _>; the returned Uart borrows the
+    // Clock for 'clk, blocking Clock::request_perf (which would change COM and
+    // invalidate the baud divisor) until dropped.
+    type Output<'clk> = Uart<'clk, pac::Uart1>;
     type Pins = Uart1Pins;
     type TxPin = GpioPin<pac::topreg::GpSpi0CsX>;
     type RxPin = GpioPin<pac::topreg::GpSpi0Sck>;
@@ -368,12 +369,13 @@ impl embedded_io::Error for UartError {
 /// [`GpioPin`] tokens (`U::Pins`) are also consumed, making it a compile-time
 /// error to use the same pads as GPIO while the UART is active.
 ///
-/// The lifetime `'clk` is:
-/// - `'static` when built from [`pac::Uart1`] — UART1 uses the fixed COM
-///   clock whose rate is independent of the APP operating point; the borrow
-///   of `Clock` ends at [`Uart::new`].
-/// - Tied to the [`Clock`](crate::clocks::Clock) when built from
-///   [`pac::Uart2`] — UART2 uses the dynamic IMG_UART clock, so the UART
+/// The lifetime `'clk` is tied to the [`Clock`](crate::clocks::Clock) for both
+/// UARTs, because both base clocks track the APP operating point:
+/// - [`pac::Uart1`] — UART1 uses the dynamic COM clock (derived from the SYS
+///   tree / SYSPLL), so the UART borrows the `Clock`, preventing
+///   [`Clock::request_perf`] from changing COM and invalidating the baud
+///   divisor until dropped.
+/// - [`pac::Uart2`] — UART2 uses the dynamic IMG_UART clock, so the UART
 ///   borrows the `Clock`, preventing [`Clock::request_perf`] until dropped.
 ///
 /// Use [`Uart::new`] to construct the driver — `U` is inferred from the PAC
@@ -403,8 +405,9 @@ impl<'clk, U: UartPeriph> Uart<'clk, U> {
     ///
     /// The return type is resolved per token via [`UartPeriph::Output`]:
     ///
-    /// - `U = pac::Uart1` → [`Uart<'static, pac::Uart1>`]: COM is Fixed/Copy;
-    ///   the borrow of `clock` ends here, pinning nothing.
+    /// - `U = pac::Uart1` → [`Uart<'a, pac::Uart1>`]: COM is Dyn; the returned
+    ///   `Uart` borrows `clock` for `'a`, preventing [`Clock::request_perf`]
+    ///   (needs `&mut Clock`) from changing COM until dropped.
     /// - `U = pac::Uart2` → [`Uart<'a, pac::Uart2>`]: IMG_UART is Dyn; the
     ///   returned `Uart` borrows `clock` for `'a`, preventing
     ///   [`Clock::request_perf`] (needs `&mut Clock`) until dropped.
