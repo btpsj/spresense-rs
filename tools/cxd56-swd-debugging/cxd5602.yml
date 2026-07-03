@@ -1,0 +1,17 @@
+name: CXD5602
+variants:
+- name: CXD5602
+  cores:
+  - name: cpu3
+    type: armv7em
+    core_access_options: !Arm
+      ap: !v1 3        # <-- use the -ap-num from your cxd5602.cfg
+  memory_map:
+  - !Ram
+    name: SRAM
+    range:
+      start: 0x0d000000
+      end: 0x0d180000   # 1.5 MB application SRAM
+    cores:
+    - cpu3
+  flash_algorithms: []
