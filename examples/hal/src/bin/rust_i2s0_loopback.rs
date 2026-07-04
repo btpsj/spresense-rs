@@ -81,7 +81,7 @@ fn sine_word(i: usize) -> u32 {
 fn analyze(rx: &[u32]) -> (f32, f32, f32) {
     let n = rx.len();
     let l = |i: usize| (rx[i] & 0xffff) as i16 as f32;
-    let mean = (0..n).map(|i| l(i)).sum::<f32>() / n as f32;
+    let mean = (0..n).map(&l).sum::<f32>() / n as f32;
     let v = |i: usize| l(i) - mean;
     let energy: f32 = (0..n).map(|i| v(i) * v(i)).sum();
     if energy <= 0.0 {

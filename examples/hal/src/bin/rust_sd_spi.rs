@@ -124,11 +124,11 @@ fn main() -> ! {
     let mut ready = false;
     for _ in 0..50_000u32 {
         send_cmd(&mut spi, 55, 0, 0x01, &mut buf);
-        if let Some(i) = send_cmd(&mut spi, 41, acmd41_arg, 0x01, &mut buf) {
-            if buf[i] == 0x00 {
-                ready = true;
-                break;
-            }
+        if let Some(i) = send_cmd(&mut spi, 41, acmd41_arg, 0x01, &mut buf)
+            && buf[i] == 0x00
+        {
+            ready = true;
+            break;
         }
     }
     writeln!(uart, "ACMD41 SD_SEND_OP_COND -> {}", if ready { "ready" } else { "TIMED OUT" }).ok();
