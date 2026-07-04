@@ -3,4 +3,7 @@
 # Output files from mkspk for flashing to Sony Spresense
 *.spk
 
-.vscode
+# Ignore editor config except the tracked debug setup (see cxd56-swd-debugging/README.md)
+**/.vscode/*
+!/.vscode/launch.json
+!/.vscode/tasks.json

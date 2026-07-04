@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "probe-rs-debug",
+            "request": "attach",
+            "name": "rust_blink (debug build) — flash + SWD attach",
+            "preLaunchTask": "flash-rust_blink-debug",
+            "cwd": "${workspaceFolder}",
+            "chip": "CXD5602",
+            "chipDescriptionPath": "${workspaceFolder}/cxd56-swd-debugging/cxd5602.yml",
+            "connectUnderReset": false,
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "${workspaceFolder}/examples/target/thumbv7em-none-eabihf/debug/rust_blink",
+                    "svdFile": "${workspaceFolder}/svd/cxd5602.svd.patched",
+                    "rttEnabled": false
+                }
+            ]
+        },
+        {
+            "type": "probe-rs-debug",
+            "request": "attach",
+            "name": "rust_blink (release build) — flash + SWD attach",
+            "preLaunchTask": "flash-rust_blink-release",
+            "cwd": "${workspaceFolder}",
+            "chip": "CXD5602",
+            "chipDescriptionPath": "${workspaceFolder}/cxd56-swd-debugging/cxd5602.yml",
+            "connectUnderReset": false,
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "${workspaceFolder}/examples/target/thumbv7em-none-eabihf/release/rust_blink",
+                    "svdFile": "${workspaceFolder}/svd/cxd5602.svd.patched",
+                    "rttEnabled": false
+                }
+            ]
+        }
+    ]
+}

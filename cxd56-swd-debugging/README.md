@@ -68,6 +68,44 @@ Remote debugging using :1337
 # output from cargo run should be stopped
 ```
 
+## VS Code (probe-rs extension)
+
+The repo ships a ready-made F5 workflow in the tracked `.vscode/launch.json` and `.vscode/tasks.json`
+at the repository root, currently wired for the `rust_blink` example. One-time setup:
+
+1. Install the `probe-rs` CLI tools (<https://probe.rs/docs/getting-started/installation/>).
+2. Install the `probe-rs.probe-rs-debugger` extension from the VS Code marketplace. The extension
+   and the `probe-rs` binary versions must match — the extension will offer to install matching
+   tools if they're missing or out of sync.
+3. Open the **repository root** in VS Code (the launch config paths are relative to it).
+
+Then pick "rust_blink (debug build) — flash + SWD attach" in the Run and Debug panel and press F5:
+
+- The `flash-rust_blink-debug` task builds the example and flashes it over the UART bootloader
+  (`cargo spresense-flash --bin rust_blink`). Note this deliberately skips `--monitor` so the task
+  terminates — a pre-launch task that holds the serial monitor open would block the debug session
+  from ever starting.
+- The firmware starts running immediately after flashing; probe-rs then **attaches** over SWD to
+  `cpu3` (probe-rs cannot flash or reset-boot this chip — the bootloader is proprietary and the
+  chip description has no flash algorithm, so attach-to-running is the only mode).
+- From there you can pause, set breakpoints, step, and inspect peripheral registers (the SVD view
+  is fed by `svd/cxd5602.svd.patched`).
+
+The release-build variant exists too; the release profile carries full debug info (`debug = 2`),
+but LTO and `opt-level = "s"` make stepping jumpy, so prefer the debug build for interactive work.
+
+To debug a different example, duplicate one task + one launch configuration and change the
+`--bin` argument and `programBinary` path. Examples outside the workspace `default-members`
+additionally need `-p examples-<member>` in the task's args.
+
+VS Code-specific caveats, on top of the known issues below:
+
+- Attach-to-running means code that executes before the attach completes can't be trapped.
+- Only `cpu3` is described in `cxd5602.yml`, so subcores of multicore examples aren't debuggable
+  this way.
+- RTT is disabled in the launch configs — the examples log via `defmt-serial` over UART, so open a
+  serial monitor in a separate terminal if you want log output while debugging.
+
 ## Troubleshooting / Known Issues
 
 - Sometimes `monitor reset` will cause the connection to be lost, other times it works correctly

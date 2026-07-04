@@ -1,0 +1,25 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "flash-rust_blink-debug",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["spresense-flash", "--bin", "rust_blink"],
+            "options": {
+                "cwd": "${workspaceFolder}/examples"
+            },
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "flash-rust_blink-release",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["spresense-flash", "--bin", "rust_blink", "--release"],
+            "options": {
+                "cwd": "${workspaceFolder}/examples"
+            },
+            "problemMatcher": ["$rustc"]
+        }
+    ]
+}
