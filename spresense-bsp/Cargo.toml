@@ -6,7 +6,7 @@ description = "Board support package for the Sony Spresense main board (CXD5602)
 license = "BSD-3-Clause"
 
 [dependencies]
-cxd56-hal          = { version = "0.1.0", path = "../cxd56-hal" }
+cxd56-hal          = { version = "0.1.0", path = "../cxd56-hal", default-features = false }
 cxd56-pac-svd2rust = { version = "0.1.0", path = "../cxd56-pac-svd2rust", features = ["critical-section"] }
 embedded-hal       = "1.0.0"
 hts221 = { version = "0.3.0", optional = true }
@@ -15,10 +15,19 @@ lps22hh-rs = { version = "2.0.0", optional = true }
 lsm6dsox = { version = "2.1.0", optional = true }
 sgp40 = "1.0.0"
 
+# The cxd56-hal dependency keeps default-features off so downstream crates can
+# pick the HAL's async-time backend; the passthrough features below mirror the
+# HAL's (enable exactly one — the HAL compile_error!s otherwise). The defaults
+# reproduce what consumers previously got via cxd56-hal's own defaults; use
+# `default-features = false` on spresense-bsp to select a non-RTC backend.
 [features]
-default = []
+default = ["rt", "time-driver-rtc"]
 pwbimu = []
-rt      = ["cxd56-pac-svd2rust/rt"]
+rt      = ["cxd56-pac-svd2rust/rt", "cxd56-hal/rt"]
+time-driver-rtc   = ["cxd56-hal/time-driver-rtc"]
+time-driver-timer = ["cxd56-hal/time-driver-timer"]
+async-delay-rtc   = ["cxd56-hal/async-delay-rtc"]
+async-delay-timer = ["cxd56-hal/async-delay-timer"]
 lsm6dsox = ["dep:lsm6dsox"]
 lis2mdl-rs = ["dep:lis2mdl-rs"]
 hts221 = ["dep:hts221"]
