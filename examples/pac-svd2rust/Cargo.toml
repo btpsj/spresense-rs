@@ -1,0 +1,16 @@
+# PAC-direct blink on the svd2rust PAC (no HAL, plain cortex-m — the old
+# crate never enabled critical-section-single-core). The PAC's `rt` build
+# script supplies memory.x + device.x.
+[package]
+name = "examples-pac-svd2rust"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+cortex-m.workspace = true
+cortex-m-rt.workspace = true
+critical-section.workspace = true
+cxd56-pac-svd2rust = { workspace = true, features = ["rt"] }
+panic-halt.workspace = true
+vcell.workspace = true

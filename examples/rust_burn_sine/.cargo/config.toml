@@ -1,8 +1,0 @@
-[target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "cargo-spresense-flash spresense-flash --monitor"
-rustflags = [
-    "--cfg", "portable_atomic_critical_section",
-]
-
-[build]
-target = "thumbv7em-none-eabihf"

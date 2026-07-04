@@ -1,0 +1,29 @@
+# The embassy-time driver example, split from the `hal` member so its backend
+# stays selectable (the HAL allows exactly one async-time backend per build).
+[package]
+name = "examples-embassy-time"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# embassy-time driver backend, mirroring the HAL's `time-driver-*` features.
+#   default (RTC):   cargo run --release --bin rust_embassy_time
+#   SP804 TIMER:     add `-p examples-embassy-time --no-default-features --features time-timer`
+#   low power:       add `--features low-power` (drops to the LP operating point first)
+# The backend's embassy tick rate must match the HAL: tick-hz-32_768 (RTC, 1:1) or
+# tick-hz-1_000_000 (SP804, software-rescaled from the perf-dependent base clock).
+[features]
+default = ["time-rtc"]
+time-rtc = ["cxd56-hal/time-driver-rtc", "embassy-time/tick-hz-32_768"]
+time-timer = ["cxd56-hal/time-driver-timer", "embassy-time/tick-hz-1_000_000"]
+low-power = []
+
+[dependencies]
+cortex-m = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt.workspace = true
+cxd56-hal.workspace = true
+# Only the driver trait + queue are in the HAL; the app brings `embassy-time` itself.
+# generic-queue-64: a fixed software queue that works with any waker (this example's
+# in-file `block_on`, and any executor that does not use embassy's integrated timers).
+embassy-time.workspace = true
+panic-halt.workspace = true

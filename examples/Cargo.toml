@@ -1,0 +1,69 @@
+# Virtual workspace tying every example together: one Cargo.lock, one
+# .cargo/config.toml, and shared dependency versions via
+# [workspace.dependencies]. Members group examples by link-level
+# configuration — cxd56-hal demands exactly one async-time backend per build,
+# the three PACs (svd2rust, chiptool, embassy-cxd56) must not share a package,
+# and the SPH critical-section impl must not meet cortex-m's single-core impl.
+#
+# Cargo unifies dependency features across every package it selects, so
+# default-members below names the largest mutually-compatible set: those
+# examples build/run bare (`cargo run --release --bin <name>`). The remaining
+# members conflict with that set by design and need explicit selection
+# (`cargo run --release -p <member> --bin <name>`); `--workspace` cannot ever
+# work. See README.md for the member map and the bulk-build commands.
+[workspace]
+resolver = "3"
+members = [
+    "hal",
+    "async-delay",
+    "embassy-time",
+    "critical-section",
+    "embassy-pac",
+    "pac-svd2rust",
+    "pac-chiptool",
+    "rust_burn_sine",
+]
+default-members = ["hal", "embassy-time", "pac-svd2rust", "rust_burn_sine"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+cortex-m = "0.7.7" # members opt into critical-section-single-core themselves
+cortex-m-rt = "0.7.5"
+critical-section = "1.2.0"
+cxd56-blink-debug = { version = "0.1.0", path = "../cxd56-blink-debug" }
+cxd56-hal = { version = "0.1.0", path = "../cxd56-hal", default-features = false, features = ["rt", "critical-section"] }
+cxd56-pac-chiptool = { version = "0.1.0", path = "../cxd56-pac-chiptool" }
+cxd56-pac-svd2rust = { version = "0.1.0", path = "../cxd56-pac-svd2rust" }
+defmt = "1.1.0"
+defmt-serial = "0.13"
+embassy-cxd56 = { version = "0.1.0", path = "../embassy-cxd56" }
+embassy-time = { version = "0.5.1", default-features = false, features = ["generic-queue-64"] }
+embedded-hal = "1.0.0"
+embedded-io = "0.7"
+fugit = "0.3"
+lis2mdl-rs = { version = "2.0.0", default-features = false, features = ["blocking"] }
+panic-halt = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+spresense-bsp = { version = "0.1.0", path = "../spresense-bsp" }
+static_cell = "2.1.1"
+vcell = "0.1.3"
+
+[profile.dev]
+panic = "abort"
+
+# rust_burn_sine's old standalone dev profile also set `lto = true`; lto and
+# panic are not allowed in per-package overrides, so its dev builds lose LTO
+# (release — the profile that matters for flash — is identical to the old one).
+[profile.dev.package.rust_burn_sine]
+opt-level = "z"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = 2
+panic = "abort"

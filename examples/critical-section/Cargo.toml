@@ -1,0 +1,17 @@
+# The SPH-based critical_section example. Its own member because
+# critical-section-impl installs the HAL's multicore-safe impl, and cortex-m's
+# critical-section-single-core impl (used by every other member) would collide
+# with it at link time — this member's cortex-m stays impl-free.
+[package]
+name = "examples-critical-section"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+cortex-m.workspace = true
+cortex-m-rt.workspace = true
+critical-section.workspace = true
+cxd56-hal = { workspace = true, features = ["critical-section-impl", "time-driver-rtc"] }
+embedded-hal.workspace = true
+panic-halt.workspace = true

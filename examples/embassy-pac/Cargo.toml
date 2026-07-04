@@ -1,0 +1,14 @@
+# Examples on embassy-cxd56 (the chiptool-PAC-based embassy HAL). Separate
+# member so no svd2rust PAC enters the graph: that PAC's `rt` would flip
+# cortex-m-rt's `device` feature and change how these bins link.
+[package]
+name = "examples-embassy-pac"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+cortex-m = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt.workspace = true
+embassy-cxd56.workspace = true
+panic-halt.workspace = true

@@ -1,0 +1,21 @@
+# Examples on the HAL's hand-rolled `async_delay` path (which excludes the
+# embassy time driver — the HAL allows exactly one async-time backend).
+[package]
+name = "examples-async-delay"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# Async-delay backing, mirroring the HAL's `async-delay-*` features. Build the
+# default (RTC) with `cargo build --release`; build the SP804 TIMER variant with
+#   cargo build --release -p examples-async-delay --no-default-features --features backing-timer
+[features]
+default = ["backing-rtc"]
+backing-rtc = ["cxd56-hal/async-delay-rtc"]
+backing-timer = ["cxd56-hal/async-delay-timer"]
+
+[dependencies]
+cortex-m = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt.workspace = true
+cxd56-hal.workspace = true
+panic-halt.workspace = true

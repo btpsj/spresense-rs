@@ -1,0 +1,25 @@
+# Everything that drives the board through cxd56-hal (plus the spresense-bsp
+# bins — the BSP sits on the same HAL configuration) on the default RTC
+# embassy time driver. Each src/bin/*.rs is one example; cargo infers the bin
+# targets, no [[bin]] blocks needed.
+[package]
+name = "examples-hal"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+cortex-m = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt.workspace = true
+cxd56-blink-debug.workspace = true
+cxd56-hal = { workspace = true, features = ["time-driver-rtc"] }
+defmt.workspace = true
+defmt-serial.workspace = true
+embedded-hal.workspace = true
+embedded-io.workspace = true
+fugit.workspace = true
+lis2mdl-rs.workspace = true
+panic-halt.workspace = true
+panic-probe.workspace = true
+spresense-bsp = { workspace = true, features = ["rt", "pwbimu"] }
+static_cell.workspace = true

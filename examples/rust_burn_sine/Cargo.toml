@@ -1,9 +1,8 @@
 [package]
 name = "rust_burn_sine"
-version = "0.1.0"
-edition = "2024"
-
-[workspace]
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
 # burn runtime — all at the same published version so generated code aligns
@@ -25,15 +24,3 @@ cxd56-hal   = { path = "../../cxd56-hal", features = ["rt", "critical-section"] 
 
 [build-dependencies]
 burn-onnx = "0.21.0"
-
-[profile.dev]
-panic = "abort"
-lto = true
-opt-level = "z"
-
-[profile.release]
-panic = "abort"
-opt-level = "s"
-lto = true
-codegen-units = 1
-debug = 2

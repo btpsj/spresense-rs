@@ -3,8 +3,9 @@ name: CI
 # Builds the whole repo on every push / PR:
 #   * the root workspace — embedded library crates for thumbv7em-none-eabihf
 #     plus the host-side flashing tools,
-#   * every standalone example crate,
-#   * every standalone on-hardware test crate (compile-only — there is no board
+#   * the standalone examples workspace (one member per link-level
+#     configuration, incl. rust_burn_sine),
+#   * the standalone on-hardware tests crate (compile-only — there is no board
 #     in CI, so `--no-run` builds the firmware without invoking the flash runner).
 #
 # The BUILD/COMPILE steps are hard gates. clippy and rustfmt run too (per request)
@@ -73,10 +74,15 @@ jobs:
           cargo clippy --locked --target $TARGET --workspace
           --exclude mkspk --exclude flash-writer --exclude cargo-spresense-flash --exclude xtask -- -D warnings
 
-  # ---- standalone example crates (each its own workspace) ----
-  # No --locked: the standalone Cargo.lock files are not kept in lockstep with
-  # their manifests, so a frozen resolve would fail. The target + linker script
-  # come from each crate's .cargo/config.toml.
+  # ---- standalone examples workspace ----
+  # No --locked: the standalone Cargo.lock is not kept in lockstep with the
+  # manifests, so a frozen resolve would fail. The target + linker script come
+  # from examples/.cargo/config.toml. One invocation per compatible member
+  # group: cargo unifies dependency features across the packages it selects,
+  # and cxd56-hal allows exactly one async-time backend per build, the
+  # chiptool-PAC members must not see cortex-m-rt's `device` feature (flipped
+  # on by the svd2rust PAC's `rt`), and the SPH critical-section impl must not
+  # meet cortex-m's single-core impl — so `--workspace` cannot work.
   examples:
     name: Examples (build + clippy)
     runs-on: ubuntu-latest
@@ -88,24 +94,28 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Build every example
+        working-directory: examples
         run: |
-          fail=0
-          for d in examples/*/; do
-            echo "::group::cargo build $d"
-            ( cd "$d" && cargo build --release ) || { echo "::error::build failed: $d"; fail=1; }
-            echo "::endgroup::"
-          done
-          exit $fail
+          set -e
+          cargo build --release -p examples-hal -p examples-embassy-time -p examples-pac-svd2rust
+          cargo build --release -p examples-embassy-pac -p examples-pac-chiptool
+          cargo build --release -p examples-async-delay
+          cargo build --release -p examples-async-delay --no-default-features --features backing-timer
+          cargo build --release -p examples-embassy-time --no-default-features --features time-timer
+          cargo build --release -p examples-critical-section
+          cargo build --release -p rust_burn_sine
       - name: Clippy every example (advisory)
         continue-on-error: true
+        working-directory: examples
         run: |
-          fail=0
-          for d in examples/*/; do
-            echo "::group::cargo clippy $d"
-            ( cd "$d" && cargo clippy -- -D warnings ) || { echo "::error::clippy failed: $d"; fail=1; }
-            echo "::endgroup::"
-          done
-          exit $fail
+          set -e
+          cargo clippy --release -p examples-hal -p examples-embassy-time -p examples-pac-svd2rust -- -D warnings
+          cargo clippy --release -p examples-embassy-pac -p examples-pac-chiptool -- -D warnings
+          cargo clippy --release -p examples-async-delay -- -D warnings
+          cargo clippy --release -p examples-async-delay --no-default-features --features backing-timer -- -D warnings
+          cargo clippy --release -p examples-embassy-time --no-default-features --features time-timer -- -D warnings
+          cargo clippy --release -p examples-critical-section -- -D warnings
+          cargo clippy --release -p rust_burn_sine -- -D warnings
 
   # ---- standalone on-hardware tests crate (compile only) ----
   tests:
@@ -170,7 +180,7 @@ jobs:
         continue-on-error: true
         run: |
           fail=0
-          for d in examples/*/ tests/; do
+          for d in examples/ tests/; do
             echo "::group::cargo fmt --check $d"
             ( cd "$d" && cargo fmt --check ) || { echo "::error::fmt drift: $d"; fail=1; }
             echo "::endgroup::"
