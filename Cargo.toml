@@ -4,6 +4,7 @@ members = [
     "cxd56-hal",
     "cxd56-pac",
     "cxd56-pac-svd2rust",
+    "cxd56-shared-clk",
     "embassy-cxd56",
     "spresense-bsp",
     "tools/*",

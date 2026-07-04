@@ -1,0 +1,10 @@
+[package]
+name = "cxd56-shared-clk"
+version = "0.1.0"
+edition = "2024"
+description = "Registry-based clock-change propagation (RegistryPerf) for the cxd56-hal shared-clock (from_ref) path"
+
+[dependencies]
+cxd56-hal = { version = "0.1.0", path = "../cxd56-hal" }
+critical-section = "1"
+fugit = "0.3"

@@ -479,6 +479,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cxd56-shared-clk"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "cxd56-hal",
+ "fugit",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
