@@ -299,6 +299,30 @@ impl<'clk, S: SpiPeriph> Spi<'clk, S> {
         Ok(S::wrap(spi, pins))
     }
 
+    /// Block until the SSP is idle: the TX FIFO has drained and the `BSY` flag
+    /// has cleared.
+    ///
+    /// Quiesce primitive for the shared-clock (`from_ref`) path: call this
+    /// before a
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
+    /// so no transfer is in flight when the clock changes, then
+    /// [`reconfigure`](Spi::reconfigure) afterwards. Mirrors the inherent
+    /// [`Uart::flush`](crate::uart::Uart::flush); also reachable as the
+    /// [`SpiBus`](embedded_hal::spi::SpiBus)`::flush` trait method.
+    pub fn flush(&mut self) -> Result<(), SpiError> {
+        self.wait_idle()
+    }
+
+    /// Shared `BSY`-poll backing [`flush`](Self::flush), the `SpiBus::flush`
+    /// trait method, and [`reconfigure`](Self::reconfigure).
+    fn wait_idle(&mut self) -> Result<(), SpiError> {
+        let mut retry = 1_000_000u32;
+        while self.spi.sspsr().read().bsy().bit_is_set() {
+            retry = retry.checked_sub(1).ok_or(SpiError::Timeout)?;
+        }
+        Ok(())
+    }
+
     /// Program the PL022 SSP registers for the `base` clock and `config`.
     ///
     /// Shared by [`Spi::new`] (borrow-checked path) and [`Spi::from_ref`]
@@ -455,10 +479,7 @@ impl<S: SpiPeriph> Spi<'static, S> {
     /// divisor for the *new* rate afterwards.
     pub fn reconfigure(&mut self, config: &SpiConfig, clock: &ClockRef) -> Result<(), SpiError> {
         // Quiesce: wait for the SSP to drain before changing divisors.
-        let mut retry = 1_000_000u32;
-        while self.spi.sspsr().read().bsy().bit_is_set() {
-            retry = retry.checked_sub(1).ok_or(SpiError::Timeout)?;
-        }
+        self.wait_idle()?;
         let base = S::base_hz_ref(clock).to_Hz();
         Self::configure_pl022(&self.spi, config, base)
     }
@@ -561,13 +582,10 @@ impl<S: SpiPeriph> SpiBus<u8> for Spi<'_, S> {
         Ok(())
     }
 
-    /// Block until the TX FIFO is empty and the SSP is idle.
+    /// Block until the TX FIFO is empty and the SSP is idle. Delegates to the
+    /// inherent [`Spi::flush`] quiesce primitive.
     fn flush(&mut self) -> Result<(), SpiError> {
-        let mut retry = 1_000_000u32;
-        while self.spi.sspsr().read().bsy().bit_is_set() {
-            retry = retry.checked_sub(1).ok_or(SpiError::Timeout)?;
-        }
-        Ok(())
+        self.wait_idle()
     }
 }
 
