@@ -52,7 +52,11 @@
 //! `request_perf` is non-re-entrant), so a single owner — e.g. a power task —
 //! drives operating-point changes while any context performs I/O through the
 //! sinks. The per-access critical sections keep an I/O borrow and a reconfigure
-//! borrow from overlapping. One window stays the caller's responsibility:
+//! borrow from overlapping. Each quiesce / reconfigure / `with` runs inside a
+//! `critical_section` — on this chip a cross-core hardware semaphore — so it
+//! briefly stalls the other core; the drains are bounded
+//! ([`UartError`]`::Timeout` / [`SpiError`]`::Timeout`) so a wedged bus aborts the
+//! change instead of hanging. One window stays the caller's responsibility:
 //! between step 2 and step 3 the clock has already moved but a sink not yet
 //! reconfigured is at a stale rate, so a *concurrent* transfer started from
 //! another context in that window would use the wrong divisor. Trigger perf
@@ -80,8 +84,10 @@
 //! let perf = crg.into_perf_control(clock);
 //!
 //! let ucfg = UartConfig::default();
-//! UART1.install(Uart::from_ref(p.uart1, upins, ucfg.clone(), clock)?, ucfg);
-//! // SPI5.install(Spi::from_ref(p.spi5, spins, scfg.clone(), clock)?, scfg);
+//! let uart = Uart::from_ref(p.uart1, upins, ucfg.clone(), clock).expect("uart");
+//! UART1.install(uart, ucfg);
+//! // let spi = Spi::from_ref(p.spi5, spins, scfg.clone(), clock).expect("spi");
+//! // SPI5.install(spi, scfg);
 //!
 //! let registry = RegistryPerf::new(perf, clock, [&UART1, &SPI5]);
 //!
@@ -89,7 +95,7 @@
 //! UART1.with(|u| u.write_byte(b'A'));
 //!
 //! // DVFS — every registered peripheral is quiesced + reconfigured around it:
-//! registry.request_perf(Perf::Lp)?;
+//! registry.request_perf(Perf::Lp)?; // returns cxd56_shared_clk::Error
 //! UART1.with(|u| u.write_byte(b'B')); // correct baud at the new operating point
 //! # Ok::<(), cxd56_shared_clk::Error>(())
 //! ```
@@ -117,14 +123,69 @@ pub enum SinkError {
 #[derive(Debug)]
 pub enum Error {
     /// The operating-point change itself failed. The clock is unchanged and no
-    /// sink was reconfigured (sinks were quiesced first, then restored on the
-    /// next successful change).
+    /// sink was reconfigured (the sinks were quiesced first, then left as-is).
     Perf(PmError),
     /// A gear change failed (see [`RegistryPerf::set_gear`] /
-    /// [`set_spi_gear`](RegistryPerf::set_spi_gear)).
+    /// [`set_spi_gear`](RegistryPerf::set_spi_gear)). Clock unchanged.
     Gear(GearError),
-    /// A sink failed to quiesce (before the change) or reconfigure (after it).
-    Sink(SinkError),
+    /// A sink failed; `index` is its position in the registry's sink array.
+    ///
+    /// On a **quiesce** failure (before the change) the clock is left untouched.
+    /// On a **reconfigure** failure (after the change) the remaining sinks are
+    /// still reconfigured best-effort, so this reports the *first* such failure
+    /// while the others move to the new rate.
+    Sink { index: usize, error: SinkError },
+}
+
+impl From<UartError> for SinkError {
+    fn from(e: UartError) -> Self {
+        SinkError::Uart(e)
+    }
+}
+
+impl From<SpiError> for SinkError {
+    fn from(e: SpiError) -> Self {
+        SinkError::Spi(e)
+    }
+}
+
+impl core::fmt::Display for SinkError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SinkError::Uart(e) => write!(f, "uart sink: {e}"),
+            SinkError::Spi(e) => write!(f, "spi sink: {e}"),
+        }
+    }
+}
+
+impl core::error::Error for SinkError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            SinkError::Uart(e) => Some(e),
+            SinkError::Spi(e) => Some(e),
+        }
+    }
+}
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            // PmError / GearError don't implement Display; fall back to Debug.
+            Error::Perf(e) => write!(f, "operating-point change failed: {e:?}"),
+            Error::Gear(e) => write!(f, "gear change failed: {e:?}"),
+            Error::Sink { index, error } => write!(f, "sink #{index}: {error}"),
+        }
+    }
+}
+
+impl core::error::Error for Error {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            // PmError / GearError don't implement core::error::Error.
+            Error::Sink { error, .. } => Some(error),
+            _ => None,
+        }
+    }
 }
 
 /// A peripheral the [`RegistryPerf`] can bracket across an operating-point
@@ -175,7 +236,13 @@ impl<U: UartPeriph> UartSink<U> {
     }
 
     /// Run `f` with mutable access to the UART, returning `None` if no UART has
-    /// been installed. `f` runs inside a critical section — keep it short.
+    /// been installed.
+    ///
+    /// `f` runs inside a critical section (interrupts off, and on this chip the
+    /// cross-core SPH held), so keep it short and **do not re-enter the same
+    /// sink** from within `f` — that is a `RefCell` double-borrow panic. The
+    /// return is `Option<R>`: if `f` returns a `Result` (e.g. I/O), the outer
+    /// `Option` will not trip `must_use`, so handle the inner error.
     pub fn with<R>(&self, f: impl FnOnce(&mut Uart<'static, U>) -> R) -> Option<R> {
         critical_section::with(|cs| self.slot.borrow(cs).borrow_mut().as_mut().map(|(u, _)| f(u)))
     }
@@ -191,10 +258,10 @@ impl<U: UartPeriph> ClockSink for UartSink<U> {
     fn quiesce(&self) -> Result<(), SinkError> {
         critical_section::with(|cs| {
             if let Some((u, _)) = self.slot.borrow(cs).borrow_mut().as_mut() {
-                u.flush(); // PL011 BUSY drain — infallible
+                u.flush()?; // bounded drain; UartError::Timeout on a wedged bus
             }
-        });
-        Ok(())
+            Ok(())
+        })
     }
 
     fn reconfigure(&self, clock: &'static ClockRef) -> Result<(), SinkError> {
@@ -230,7 +297,8 @@ impl<S: SpiPeriph + Send> SpiSink<S> {
     }
 
     /// Run `f` with mutable access to the SPI bus, returning `None` if none has
-    /// been installed. `f` runs inside a critical section — keep it short.
+    /// been installed. Same critical-section / no-re-entry / `Option<R>` caveats
+    /// as [`UartSink::with`].
     pub fn with<R>(&self, f: impl FnOnce(&mut Spi<'static, S>) -> R) -> Option<R> {
         critical_section::with(|cs| self.slot.borrow(cs).borrow_mut().as_mut().map(|(s, _)| f(s)))
     }
@@ -292,8 +360,9 @@ impl DelaySink {
     }
 
     /// Run `f` with mutable access to the delay, returning `None` if none has
-    /// been installed. `f` runs inside a critical section — a blocking delay
-    /// therefore holds interrupts off for its duration.
+    /// been installed. Same critical-section / no-re-entry caveats as
+    /// [`UartSink::with`]; note a blocking delay holds interrupts off (and the
+    /// cross-core SPH) for its full duration.
     pub fn with<R>(&self, f: impl FnOnce(&mut Delay<'static>) -> R) -> Option<R> {
         critical_section::with(|cs| self.slot.borrow(cs).borrow_mut().as_mut().map(f))
     }
@@ -351,19 +420,26 @@ impl<const N: usize> RegistryPerf<N> {
 
     /// Quiesce all sinks, run `op` (the actual clock change), reconfigure all
     /// sinks. If a sink cannot quiesce, `op` is not run and the clock is left
-    /// untouched.
+    /// untouched. After the change every sink is reconfigured even if one fails,
+    /// so none is stranded at the stale rate; the first failure is returned.
     fn bracket(&self, op: impl FnOnce(&PerfControl) -> Result<(), Error>) -> Result<(), Error> {
-        // CLK_CHG_START: drain every sink before the clock moves.
-        for &s in &self.sinks {
-            s.quiesce().map_err(Error::Sink)?;
+        // CLK_CHG_START: drain every sink before the clock moves; abort (clock
+        // untouched) if any can't quiesce.
+        for (index, &s) in self.sinks.iter().enumerate() {
+            s.quiesce().map_err(|error| Error::Sink { index, error })?;
         }
         // The actual operating-point / gear change (re-samples ClockRef).
         op(&self.inner)?;
-        // CLK_CHG_END: reprogram every sink for the new rates.
-        for &s in &self.sinks {
-            s.reconfigure(self.clock).map_err(Error::Sink)?;
+        // CLK_CHG_END: reconfigure EVERY sink even if one fails (so none is left
+        // stranded at the stale rate). `and` keeps the first error.
+        let mut result = Ok(());
+        for (index, &s) in self.sinks.iter().enumerate() {
+            result = result.and(
+                s.reconfigure(self.clock)
+                    .map_err(|error| Error::Sink { index, error }),
+            );
         }
-        Ok(())
+        result
     }
 
     /// Change the CPU/bus operating point, bracketing all sinks. Replaces a bare
