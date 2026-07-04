@@ -13,6 +13,7 @@ use crate::gpio::GpioPin;
 use crate::pac;
 use crate::regs::topreg;
 
+#[derive(Clone)]
 pub enum WordLength {
     Five,
     Six,
@@ -20,17 +21,20 @@ pub enum WordLength {
     Eight,
 }
 
+#[derive(Clone)]
 pub enum StopBits {
     One,
     Two,
 }
 
+#[derive(Clone)]
 pub enum Parity {
     None,
     Even,
     Odd,
 }
 
+#[derive(Clone)]
 pub struct UartConfig {
     pub baud_rate: u32,
     pub word_length: WordLength,
@@ -614,10 +618,10 @@ impl<U: UartPeriph> Uart<'static, U> {
     /// is not updated afterwards. Before calling
     /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
     /// for a UART on a perf-dependent clock (UART1→COM, UART2→IMG_UART), drain
-    /// in-flight TX with [`flush`](Uart::flush); after the change, rebuild the
-    /// `Uart` with `from_ref` so its divisor matches the new rate. A perf change
-    /// mid-transmission garbles the in-flight byte (a correctness issue, not
-    /// undefined behaviour).
+    /// in-flight TX with [`flush`](Uart::flush); after the change, call
+    /// [`reconfigure`](Uart::reconfigure) (or rebuild with `from_ref`) so the
+    /// divisor matches the new rate. A perf change mid-transmission garbles the
+    /// in-flight byte (a correctness issue, not undefined behaviour).
     ///
     /// # Example
     /// ```ignore
@@ -655,6 +659,43 @@ impl<U: UartPeriph> Uart<'static, U> {
             pins,
             _life: PhantomData,
         })
+    }
+
+    /// Rewrite the baud divisor in place for the current operating point.
+    ///
+    /// Reads the live rate from `clock` (the shared [`ClockRef`]) and reprograms
+    /// the PL011 baud divisor after draining any in-flight TX, so an existing
+    /// `'static` UART can follow a
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
+    /// without being dropped and rebuilt. Stateless — the caller decides when to
+    /// call it, typically gated on [`ClockRef::generation`] changing:
+    ///
+    /// ```ignore
+    /// let mut last = clock.generation();
+    /// // ... after perf_ctl.request_perf(...):
+    /// if clock.generation() != last {
+    ///     uart.reconfigure(&config, clock)?;
+    ///     last = clock.generation();
+    /// }
+    /// ```
+    ///
+    /// Line settings come from `config` (unchanged across a perf change); only
+    /// the base clock differs. The byte in flight *during* the hardware
+    /// transition is still the caller's concern — drain with
+    /// [`flush`](Uart::flush) before `request_perf`.
+    pub fn reconfigure(&mut self, config: &UartConfig, clock: &ClockRef) -> Result<(), UartError> {
+        // Drain TX so we never rewrite IBRD/FBRD mid-byte.
+        self.flush();
+        let hz = U::base_hz_ref(clock).to_Hz();
+        self.inner
+            .enable(line_config(config), config.baud_rate, hz)?;
+        // enable() rewrites UARTCR; re-apply internal loopback if configured
+        // (mirrors `new`/`from_ref`).
+        if config.loopback {
+            // SAFETY: as in `from_ref` — fixed PL011 base, no other alias.
+            unsafe { &*U::regs() }.cr().modify(|_, w| w.lbe().set_bit());
+        }
+        Ok(())
     }
 }
 
