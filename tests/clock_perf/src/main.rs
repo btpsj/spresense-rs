@@ -43,6 +43,9 @@ use cxd56_hal::timer::{Prescaler, Timer};
 use cxd56_hal::uart::{Uart, Uart1Pins, UartConfig};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
+// UART1 borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
+// `Clock` must outlive the `'static` UART stored in `SERIAL`.
+static CLOCK: StaticCell<Clock> = StaticCell::new();
 
 const RTC_HZ: u64 = 32_768;
 const WINDOW_TICKS: u64 = RTC_HZ / 4; // 250 ms
@@ -110,9 +113,12 @@ fn main() -> ! {
     let (meas_hp2, _t) = measure(&clock, tok, &rtc);
 
     // --- Report over the restored-HP console. ---------------------------------
+    // Promote the clock to `'static` so the UART1 console (which borrows it)
+    // can live in `SERIAL`.
+    let clock = CLOCK.init(clock);
     let parts = Parts::new(dp.topreg);
     let uart1_pins = Uart1Pins { tx: parts.gp_spi0_cs_x, rx: parts.gp_spi0_sck };
-    let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), &clock).expect("uart1 init failed");
+    let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), clock).expect("uart1 init failed");
     defmt_serial::defmt_serial(SERIAL.init(uart1));
 
     defmt::println!("clock_perf: request_perf operating-point round-trip (HP->LP->HP)");

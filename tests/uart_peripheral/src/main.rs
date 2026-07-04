@@ -35,7 +35,7 @@ static CLOCK: StaticCell<Clock> = StaticCell::new();
 /// Transmit one byte and read it straight back (loopback), asserting a match.
 fn echo_byte(uart: &mut Uart<'_, pac::Uart2>, expect: u8) -> Result<(), &'static str> {
     uart.write_byte(expect);
-    uart.flush();
+    uart.flush().map_err(|_| "TX flush timeout")?;
     // After flush() the byte has been clocked out and looped to RX; poll the RX
     // FIFO with a bounded spin so a wiring/clock fault fails fast instead of hanging.
     for _ in 0..1_000_000 {

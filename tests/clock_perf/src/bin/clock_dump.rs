@@ -35,6 +35,9 @@ use cxd56_hal::pac;
 use cxd56_hal::uart::{Uart, Uart1Pins, UartConfig};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
+// UART1 borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
+// `Clock` must outlive the `'static` UART stored in `SERIAL`.
+static CLOCK: StaticCell<Clock> = StaticCell::new();
 
 /// `APP_CKSEL` lives in topreg_sub (offset 0x418); read raw like `buses.rs`.
 const APP_CKSEL_ADDR: usize = 0x0410_3418;
@@ -191,10 +194,13 @@ fn main() -> ! {
 
     // --- Report: build the console from the *current* live clock (correct baud
     //     wherever we ended up), then print everything. -------------------------
+    // Promote the clock to `'static` so the UART1 console (which borrows it)
+    // can live in `SERIAL`.
+    let clock = CLOCK.init(clock);
     let now = clock.freeze();
     let parts = Parts::new(dp.topreg);
     let uart1_pins = Uart1Pins { tx: parts.gp_spi0_cs_x, rx: parts.gp_spi0_sck };
-    let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), &clock).expect("uart1 init failed");
+    let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), clock).expect("uart1 init failed");
     defmt_serial::defmt_serial(SERIAL.init(uart1));
 
     defmt::println!(

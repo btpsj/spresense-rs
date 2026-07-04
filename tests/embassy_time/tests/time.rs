@@ -33,6 +33,9 @@ use cxd56_hal::uart::Uart;
 // `defmt-test` owns the module body, so keep the logger cell at crate root and reach
 // it via `crate::SERIAL`.
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
+// UART1 borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
+// `Clock` must outlive the `'static` UART stored in `SERIAL`.
+static CLOCK: StaticCell<cxd56_hal::clocks::Clock> = StaticCell::new();
 
 // Forward the active backing's timer interrupt(s) to the driver. RTC: one alarm IRQ.
 // SP804: TIMER0 counts the free-running overflow, TIMER1 is the one-shot alarm.
@@ -169,11 +172,15 @@ mod tests {
         crate::time::init(&clock);
         let clocks = clock.freeze();
 
+        // Promote the clock to `'static` so the UART1 console (which borrows
+        // it) can live in `SERIAL`.
+        let clock = crate::CLOCK.init(clock);
+
         // Install the defmt-over-UART1 logger before any test logs a frame.
         let parts = Parts::new(pac.topreg);
         let uart1_pins = Uart1Pins { tx: parts.gp_spi0_cs_x, rx: parts.gp_spi0_sck };
         let uart =
-            Uart::new(pac.uart1, uart1_pins, UartConfig::default(), &clock).expect("uart1 init failed");
+            Uart::new(pac.uart1, uart1_pins, UartConfig::default(), clock).expect("uart1 init failed");
         defmt_serial::defmt_serial(crate::SERIAL.init(uart));
 
         // Confirm which backing compiled in — the name + rate come from the HAL, so
