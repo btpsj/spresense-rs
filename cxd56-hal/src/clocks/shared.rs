@@ -213,20 +213,28 @@ impl ClockRef {
         Hertz::<u32>::Hz(self.img_vsync.load(Ordering::Acquire))
     }
 
-    /// Monotonic generation counter, incremented once each time the operating
-    /// point or a gear divisor is applied (every [`PerfControl`] mutation that
-    /// resamples). It lets a peripheral built with `from_ref` detect that its
-    /// cached baud/SCK divisor is stale and call `reconfigure` exactly once per
-    /// change — without this crate storing any per-peripheral state:
+    /// Monotonic generation counter, incremented once on **every** [`PerfControl`]
+    /// mutation that resamples (`request_perf`, `set_gear`, `set_spi_gear`). It
+    /// lets a peripheral built with `from_ref` detect that its cached baud/SCK
+    /// divisor may be stale and call `reconfigure` — without this crate storing
+    /// any per-peripheral state:
     ///
     /// ```ignore
     /// let mut last = clock.generation();
     /// // ... after perf_ctl.request_perf(...):
-    /// if clock.generation() != last {
+    /// let gen = clock.generation();
+    /// if gen != last {
     ///     uart.reconfigure(&config, clock)?;
-    ///     last = clock.generation();
+    ///     last = gen;
     /// }
     /// ```
+    ///
+    /// This is a single global epoch, not a per-clock signal: it bumps even for a
+    /// change that doesn't move *this* peripheral's base clock (e.g. a `set_gear`
+    /// on an unrelated port), so a gated `reconfigure` may occasionally rewrite an
+    /// identical divisor — a cheap glitch-only no-op, not a correctness issue.
+    /// Compare a specific rate accessor (e.g. [`com`](Self::com)) if you need
+    /// per-clock granularity.
     pub fn generation(&self) -> u32 {
         self.gen_counter.load(Ordering::Acquire)
     }

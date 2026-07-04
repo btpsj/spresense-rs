@@ -69,6 +69,11 @@ const FIFO_DEPTH: usize = 8;
 /// returns [`SpiError::Timeout`] instead of hanging.
 const TRANSFER_RETRY: u32 = 100_000;
 
+/// Bounded spin budget for draining the SSP to idle ([`Spi::flush`] / quiesce);
+/// larger than [`TRANSFER_RETRY`] because a full FIFO may still need to shift
+/// out. A wedged bus returns [`SpiError::Timeout`] instead of hanging.
+const IDLE_RETRY: u32 = 1_000_000;
+
 // ============================================================================
 // Public configuration types
 // ============================================================================
@@ -316,7 +321,7 @@ impl<'clk, S: SpiPeriph> Spi<'clk, S> {
     /// Shared `BSY`-poll backing [`flush`](Self::flush), the `SpiBus::flush`
     /// trait method, and [`reconfigure`](Self::reconfigure).
     fn wait_idle(&mut self) -> Result<(), SpiError> {
-        let mut retry = 1_000_000u32;
+        let mut retry = IDLE_RETRY;
         while self.spi.sspsr().read().bsy().bit_is_set() {
             retry = retry.checked_sub(1).ok_or(SpiError::Timeout)?;
         }
@@ -451,9 +456,10 @@ impl<S: SpiPeriph> Spi<'static, S> {
     /// SPI5's base clock (`img_wspi`) is perf-dependent. The SCK divisors are
     /// computed at construction and not updated afterwards; after a
     /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
-    /// they are stale. Finish any in-flight transfer, then rebuild the `Spi`
-    /// with `from_ref` so the SCK rate matches the new operating point. A perf
-    /// change mid-transfer corrupts the in-flight word (a correctness issue,
+    /// they are stale. Drain the bus ([`flush`](Spi::flush)), then either rewrite
+    /// the divisor in place with [`reconfigure`](Spi::reconfigure) or rebuild the
+    /// `Spi` with `from_ref`, so the SCK rate matches the new operating point. A
+    /// perf change mid-transfer corrupts the in-flight word (a correctness issue,
     /// not undefined behaviour).
     pub fn from_ref(spi: S, pins: S::Pins, config: SpiConfig, clock: &'static ClockRef)
         -> Result<Self, SpiError>

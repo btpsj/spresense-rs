@@ -359,13 +359,17 @@ pub enum UartError {
     /// PL011 driver error (baud divisor overflow, or RX overrun/parity/framing/break).
     #[error("pl011 error: {0}")]
     Pl011(#[from] pl011::Error),
+    /// [`Uart::flush`] exceeded its bounded spin budget waiting for the TX shift
+    /// register to drain (a wedged `BUSY`).
+    #[error("uart flush timed out")]
+    Timeout,
 }
 
 impl embedded_hal_nb::serial::Error for UartError {
     fn kind(&self) -> embedded_hal_nb::serial::ErrorKind {
         match self {
             UartError::Pl011(e) => embedded_hal_nb::serial::Error::kind(e),
-            UartError::Clock(_) => embedded_hal_nb::serial::ErrorKind::Other,
+            UartError::Clock(_) | UartError::Timeout => embedded_hal_nb::serial::ErrorKind::Other,
         }
     }
 }
@@ -374,7 +378,7 @@ impl embedded_io::Error for UartError {
     fn kind(&self) -> embedded_io::ErrorKind {
         match self {
             UartError::Pl011(e) => embedded_io::Error::kind(e),
-            UartError::Clock(_) => embedded_io::ErrorKind::Other,
+            UartError::Clock(_) | UartError::Timeout => embedded_io::ErrorKind::Other,
         }
     }
 }
@@ -409,6 +413,11 @@ pub struct Uart<'clk, U: UartPeriph> {
 // matching the PAC `Periph` Send impl. Both concrete `U::Pins` types
 // (`Uart1Pins`, `Uart2Pins`) are Send; the sealed trait prevents other impls.
 unsafe impl<U: UartPeriph> Send for Uart<'_, U> {}
+
+/// Bounded spin budget for [`Uart::flush`], so a wedged TX `BUSY` returns
+/// [`UartError::Timeout`] instead of hanging — important when `flush` runs
+/// inside a critical section (e.g. a clock-change quiesce).
+const FLUSH_RETRY: u32 = 1_000_000;
 
 impl<'clk, U: UartPeriph> Uart<'clk, U> {
     /// Enable the peripheral, route its pads to UART function, and return the
@@ -487,10 +496,21 @@ impl<'clk, U: UartPeriph> Uart<'clk, U> {
         self.inner.read_word().ok().flatten()
     }
 
-    /// Block until the TX FIFO and shift register are empty.
+    /// Block until the TX FIFO and shift register are empty (PL011 `BUSY`
+    /// clear), or return [`UartError::Timeout`] after a bounded spin.
+    ///
+    /// Quiesce primitive for the shared-clock path — drain before a
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf),
+    /// then [`reconfigure`](Uart::reconfigure). The bound matters because a
+    /// caller may run this inside a critical section (e.g. the `cxd56-shared-clk`
+    /// registry), where an unbounded wait would stall the system.
     #[inline]
-    pub fn flush(&mut self) {
-        while self.inner.is_busy() {}
+    pub fn flush(&mut self) -> Result<(), UartError> {
+        let mut retry = FLUSH_RETRY;
+        while self.inner.is_busy() {
+            retry = retry.checked_sub(1).ok_or(UartError::Timeout)?;
+        }
+        Ok(())
     }
 
     /// Disable the UART, restore the TX/RX pads to GPIO function (Func0), and
@@ -673,9 +693,10 @@ impl<U: UartPeriph> Uart<'static, U> {
     /// ```ignore
     /// let mut last = clock.generation();
     /// // ... after perf_ctl.request_perf(...):
-    /// if clock.generation() != last {
+    /// let gen = clock.generation();
+    /// if gen != last {
     ///     uart.reconfigure(&config, clock)?;
-    ///     last = clock.generation();
+    ///     last = gen;
     /// }
     /// ```
     ///
@@ -684,8 +705,9 @@ impl<U: UartPeriph> Uart<'static, U> {
     /// transition is still the caller's concern — drain with
     /// [`flush`](Uart::flush) before `request_perf`.
     pub fn reconfigure(&mut self, config: &UartConfig, clock: &ClockRef) -> Result<(), UartError> {
-        // Drain TX so we never rewrite IBRD/FBRD mid-byte.
-        self.flush();
+        // Drain TX so we never rewrite IBRD/FBRD mid-byte (bounded — propagates
+        // UartError::Timeout on a wedged bus instead of spinning forever).
+        self.flush()?;
         let hz = U::base_hz_ref(clock).to_Hz();
         self.inner
             .enable(line_config(config), config.baud_rate, hz)?;
