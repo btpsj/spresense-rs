@@ -12,7 +12,7 @@ rooted here.
 
 ## How it works
 
-```
+```text
 cargo run / cargo test           (from tests/)
   └─ runner = cargo-spresense-flash spresense-flash --test
        ├─ build ELF → mkspk → flash over serial (DTR reset, XMODEM, reboot)
@@ -32,9 +32,11 @@ pass/fail summary (`--no-external-loopback` skips the jumper-dependent ones).
 ## Prerequisites
 
 - Install the harness-aware tool (once, and after any change to it):
-  ```
+
+  ```bash
   cargo install --path tools/cargo-spresense-flash --force
   ```
+
 - Board connected over USB (the on-board CP2102N is auto-detected; override with
   `--port /dev/ttyUSBx` or `SPRESENSE_PORT`). Close any serial monitor first —
   only one process can own the port.
@@ -58,7 +60,7 @@ not a rustc one.
 Run everything from `tests/`:
 
 | Target | Kind | Command | Wiring |
-|--------|------|---------|--------|
+| ------ | ---- | ------- | ------ |
 | `uart_peripheral` | bin | `cargo run --release --bin uart_peripheral` | none |
 | ↳ external loopback | | `… --features external-loopback` | JP1 D01↔D00 |
 | `clock_perf` | bin | `cargo run --release --bin clock_perf` | none |
@@ -86,7 +88,7 @@ Three sub-tests run in `main`, each logged with `defmt::println!`, ending with
 the `TEST RESULT` verdict line.
 
 | # | Sub-test | Wiring | What it checks |
-|---|----------|--------|----------------|
+| - | -------- | ------ | -------------- |
 | 1 | `console_uart1` | none | UART1 console + `defmt-serial` come up (reaching the host over defmt *is* the assertion) |
 | 2 | `uart2_internal_loopback` | none | UART2 in PL011 loopback (`UARTCR.LBE`): write a byte pattern, read it back, assert equal |
 | 3 | `uart2_external_loopback` | jumper **JP1 D01↔D00** | same over the real pads; gated behind `--features external-loopback` |
@@ -172,9 +174,9 @@ both variants to cover both backends.
 CXD5602 GPIO is **1.8 V** — wire to the board's 1.8V rail only, never 3.3/5 V.
 
 | Pin | Header | Wire to | Expected |
-|-----|--------|---------|----------|
+| --- | ------ | ------- | -------- |
 | `gp_emmc_data3` / D21 | JP2 pin 4 | **1.8V** | High |
-| `gp_emmc_data2` / D20 | JP2 pin 5 | **GND**  | Low  |
+| `gp_emmc_data2` / D20 | JP2 pin 5 | **GND** | Low |
 | `gp_uart2_rts` / D28 ↔ `gp_uart2_cts` / D27 | JP1 pin 4 ↔ pin 5 | **short the two pins together** (jumper) | out High→in High, out Low→in Low |
 | `gp_sen_irq_in` / D22 | JP1 pin 12 | **leave unconnected** | pull-up→High, pull-down→Low |
 
