@@ -36,7 +36,7 @@
 #![no_main]
 
 use cortex_m_rt as _;
-use cxd56_hal::{async_delay, gpio::Wait, pac, uart_alt::Uart};
+use cxd56_hal::{async_delay, gpio::Wait, pac, uart::Uart};
 use defmt_serial as _;
 use panic_probe as _;
 use static_cell::StaticCell;
@@ -163,7 +163,7 @@ mod tests {
     use cxd56_hal::gpio::pins::Parts;
     use cxd56_hal::pwm::PwmBlock;
     use cxd56_hal::{async_delay, pac};
-    use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+    use cxd56_hal::uart::{Uart, Uart1Pins};
 
     struct State {
         pwm: cxd56_hal::pwm::Pwm<0>,
