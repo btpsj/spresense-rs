@@ -21,7 +21,7 @@ use static_cell::StaticCell;
 /// The blocking UART driver re-initialises the console and recomputes the baud
 /// from this value, so it **must** match the board's real COM rate or the whole
 /// defmt stream is garbled and the harness can't decode it (timeout → exit 2).
-/// This matches `examples/rust_hello_uart_embassy`'s `COM_HZ`; confirm it there
+/// This matches the `rust_hello_uart_embassy` example's `COM_HZ`; confirm it there
 /// (clean greeting at 115200) before trusting this test's verdict.
 const COM_HZ: u32 = 48_000_000;
 

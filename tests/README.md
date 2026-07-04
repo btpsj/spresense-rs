@@ -225,7 +225,7 @@ itself.
 > **Note on `COM_HZ`:** the blocking driver re-initialises the console and
 > recomputes the baud from `COM_HZ`. If that value doesn't match the board's
 > real COM clock, the serial output is garbled and the harness can't decode it
-> (timeout). Validate the value with `examples/rust_hello_uart_embassy` (clean
+> (timeout). Validate the value with the `rust_hello_uart_embassy` example (clean
 > greeting at 115200) and keep the two in sync.
 
 ### `pwm` — PWM0 loopback (defmt-test)

@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 # Standalone workspace so the test crate builds independently of the repo
-# workspace (same convention as examples/*).
+# workspace (same convention as the examples/ workspace).
 [workspace]
 
 # Plain-defmt bins (cargo run --release --bin <name>); print TEST RESULT: PASS/FAIL.

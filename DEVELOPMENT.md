@@ -125,7 +125,7 @@ doesn't exist: every GPIO interrupt source the SDK ships is an external chip
 baseline level for milliseconds before the edge, so the detector has long since
 re-sampled. There is no self-loopback (clear-then-immediately-drive the same pin
 on the same core) anywhere in the tree — that pattern is the only thing that hits
-the window, and `examples/rust_gpio_wait_lp` deliberately uses it (D28→D27).
+the window, and the `rust_gpio_wait_lp` example deliberately uses it (D28→D27).
 
 ### Realistic ways to hit it *without* a loopback
 
@@ -175,7 +175,7 @@ expiry is the counter's zero-crossing latch, recorded by the `TIMER0` ISR (which
 must clear the level interrupt anyway) for a later poll to observe.
 
 Both backings are exercised by the same examples and tests at both operating points:
-`examples/rust_gpio_wait` (boot OP) and `examples/rust_gpio_wait_lp` (LP), plus the
+the `rust_gpio_wait` (boot OP) and `rust_gpio_wait_lp` (LP) examples, plus the
 `gpio` edge tests in `tests/`, each take a `backing-rtc` / `backing-timer` feature
 (default in the examples; in the tests crate both are selected with
 `--no-default-features --features backing-*`). The LP + timer combination is the
@@ -242,7 +242,7 @@ the backing's vector(s): `RTC0_A0` → `time::on_interrupt` (rtc); `TIMER0` →
 GPIO edge-arm settle routes through whichever backend is active, so `wait_for_*_edge`
 needs the same forwarding.
 
-**Exercised by** `examples/rust_embassy_time` (four concurrent one-shot timers + a
+**Exercised by** the `rust_embassy_time` example (four concurrent one-shot timers + a
 periodic tick) and the `time` test in `tests/` (monotonic `now`, elapsed vs an independent
 raw-RTC oracle, concurrent ordering), each with a `time-rtc` (default) / `time-timer` /
 `low-power` feature — both backings at both operating points. The cross-OP check is
@@ -322,7 +322,7 @@ its `pump()` loop keeps up to `FIFO_DEPTH` (8, matching NuttX `CXD56_SPI_FIFOSZ`
 flight, never starving the shift register mid-call — the same technique as NuttX
 `cxd56_spi.c spi_exchange` and rp2040-hal's transfer loop. The earlier word-at-a-time
 implementation blocked on `RNE` after each byte, draining the FIFO and pulsing CS between
-every byte, which would abort any multi-byte SD command. `examples/rust_sd_spi` exercises
+every byte, which would abort any multi-byte SD command. The `rust_sd_spi` example exercises
 this end-to-end (CMD0/CMD8/ACMD41/CMD58), and the `spi` test in `tests/` covers the
 pipelined path in isolation.
 

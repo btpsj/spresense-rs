@@ -18,20 +18,23 @@ cd spresense-rs
 # Installs the `cargo spresense-flash` subcommand (bundles mkspk + flash-writer).
 # For more information about flashing, see the Flashing section.
 cargo install --path tools/cargo-spresense-flash
-cd examples/rust_blink
+cd examples
 # Build, package, and flash in one step. The serial port is auto-detected; pass
 # --port /dev/ttyUSB0 (or set SPRESENSE_PORT) to choose it explicitly.
-cargo spresense-flash --release
+cargo spresense-flash --release --bin rust_blink
 ```
 
-Examples whose `.cargo/config.toml` sets a `runner` (e.g. `rust_blink`,
-`rust_hello_uart`) can be flashed with plain `cargo run` — and, for UART
-examples, `cargo run` also opens a serial monitor on the board's output:
+The examples share one workspace whose `.cargo/config.toml` sets a `runner`,
+so any example can be flashed with plain `cargo run` — which also opens a
+serial monitor on the board's output:
 
 ```bash
-cd examples/rust_hello_uart
-cargo run --release    # build + flash + serial monitor
+cd examples
+cargo run --release --bin rust_hello_uart    # build + flash + serial monitor
 ```
+
+See [`examples/README.md`](examples/README.md) for the full example map (a few
+examples additionally need `-p <member>` to select their build configuration).
 
 ![Rust Blinking on Sony Spresense](./assets/spresense.gif)
 
@@ -65,19 +68,21 @@ those, nothing required on `PATH`), and behaves like `cargo build`/`cargo run`:
 
 ```bash
 cargo install --path tools/cargo-spresense-flash
-cd examples/rust_blink
-cargo spresense-flash --release          # auto-detects the bin and the serial port
-cargo spresense-flash --release --monitor   # ...then stream the board's UART output
+cd examples
+cargo spresense-flash --release --bin rust_blink          # auto-detects the serial port
+cargo spresense-flash --release --bin rust_blink --monitor   # ...then stream the board's UART output
 ```
 
-- **Target**: like `cargo run`, it builds the crate's sole binary automatically;
-  pass `--bin <name>`/`--example <name>` only when ambiguous.
+- **Target**: like `cargo run`, it builds a crate's sole binary automatically;
+  pass `--bin <name>`/`--example <name>` when ambiguous (always, in the
+  examples workspace).
 - **Serial port**: auto-detected from the attached USB serial adapters. With more
   than one it prompts; override with `--port` or `SPRESENSE_PORT`.
 - **Install name**: the SPK header savename defaults to `nuttx` (the name the
   bootloader boots); override with `--name`.
-- **`cargo run` runner**: add this to an example's `.cargo/config.toml` so a plain
-  `cargo run` builds, flashes, and (optionally) monitors:
+- **`cargo run` runner**: add this to a project's `.cargo/config.toml` (the
+  examples workspace ships it) so a plain `cargo run` builds, flashes, and
+  (optionally) monitors:
 
   ```toml
   [target.'cfg(all(target_arch = "arm", target_os = "none"))']
@@ -97,8 +102,8 @@ bytes.
 git clone --recursive https://github.com/sonydevworld/spresense.git
 export SPRESENSE_SDK=$(realpath spresense)
 git clone https://github.com/bsaintjo/spresense-rs
-cd spresense-rs/examples/rust_blink
-cargo build --release
+cd spresense-rs/examples
+cargo build --release --bin rust_blink
 "$SPRESENSE_SDK"/nuttx/tools/cxd56/mkspk -c 2 target/thumbv7em-none-eabihf/release/rust_blink nuttx target/rust_blink.spk
 "$SPRESENSE_SDK"/sdk/tools/flash.sh -c /dev/ttyUSB0 target/rust_blink.spk
 ```

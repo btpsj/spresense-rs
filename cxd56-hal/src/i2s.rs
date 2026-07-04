@@ -20,7 +20,7 @@
 //! [`I2s::write_16_blocking`], [`I2s::read_16_blocking`] and
 //! [`I2s::transfer_16_blocking`] drive one-shot transfers through the audio
 //! DMA (BCA). With an external `DATA_OUT`→`DATA_IN` jumper (Arduino D18→D19)
-//! the duplex transfer forms a loopback — see `examples/rust_i2s0_loopback`.
+//! the duplex transfer forms a loopback — see the `rust_i2s0_loopback` example.
 //!
 //! # Lifetime — why there is none
 //!

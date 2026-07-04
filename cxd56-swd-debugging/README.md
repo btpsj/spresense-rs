@@ -27,8 +27,8 @@ a JTAG cable to a breakout board for connecting to a Raspberry Pi Debug Probe.
 
 ```bash
 # Flash a simple binary to the board
-$ cd examples/rust_hello_uart_alt
-$ cargo run
+$ cd examples
+$ cargo run --bin rust_hello_uart
 
 $ openocd -f interface/cmsis-dap.cfg -c "transport select swd" -f cxd5602.cfg
 # ...
@@ -51,8 +51,8 @@ core::ptr::read_volatile<u32> (src=0xe000e010)
 
 ```bash
 # Flash a simple binary to the board
-$ cd examples/rust_hello_uart_alt
-$ cargo run
+$ cd examples
+$ cargo run --bin rust_hello_uart
 
 # Switch to another terminal tab to keep watch of the output
 
