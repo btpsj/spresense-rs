@@ -75,8 +75,7 @@ fn uart2_internal_loopback(
         clocks,
     )
     .map_err(|_| "Uart2::new failed")?;
-    let result = run_pattern(&mut uart);
-    result
+    run_pattern(&mut uart)
 }
 
 /// [3/3] UART2 over the real JP1 pads — requires a D01 (TXD) ↔ D00 (RXD) jumper.
@@ -155,11 +154,7 @@ fn main() -> ! {
         "[3/3] uart2_external_loopback: SKIPPED (--features external-loopback + jumper JP1 D01↔D00)"
     );
 
-    if all_ok {
-        defmt::println!("TEST RESULT: PASS");
-    } else {
-        defmt::println!("TEST RESULT: FAIL");
-    }
+    defmt::println!("TEST RESULT: {=str}", if all_ok { "PASS" } else { "FAIL" });
 
     // Verdict delivered; halt cleanly (the UART FIFO has already drained the line).
     loop {

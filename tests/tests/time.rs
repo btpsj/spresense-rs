@@ -114,15 +114,15 @@ mod rt {
         let mut ao: Option<A::Output> = None;
         let mut bo: Option<B::Output> = None;
         poll_fn(|cx| {
-            if ao.is_none() {
-                if let Poll::Ready(v) = a.as_mut().poll(cx) {
-                    ao = Some(v);
-                }
+            if ao.is_none()
+                && let Poll::Ready(v) = a.as_mut().poll(cx)
+            {
+                ao = Some(v);
             }
-            if bo.is_none() {
-                if let Poll::Ready(v) = b.as_mut().poll(cx) {
-                    bo = Some(v);
-                }
+            if bo.is_none()
+                && let Poll::Ready(v) = b.as_mut().poll(cx)
+            {
+                bo = Some(v);
             }
             if ao.is_some() && bo.is_some() {
                 Poll::Ready((ao.take().unwrap(), bo.take().unwrap()))

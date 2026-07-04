@@ -147,7 +147,7 @@ async fn measure(gpio: &mut cxd56_hal::gpio::InterruptInput<pac::topreg::GpSenIr
 
     // RTC runs at 32_768 Hz → each tick is 1_000_000 / 32_768 ≈ 30.5 µs.
     let period_us = (period_ticks as u64 * 1_000_000 / 32_768) as u32;
-    let duty_pct  = if period_ticks == 0 { 0 } else { high_ticks * 100 / period_ticks };
+    let duty_pct  = (high_ticks * 100).checked_div(period_ticks).unwrap_or(0);
 
     Measurement { period_us, duty_pct }
 }
