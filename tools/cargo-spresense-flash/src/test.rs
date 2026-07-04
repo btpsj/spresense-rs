@@ -6,7 +6,7 @@
 //! prints each decoded line live, and watches for verdict markers:
 //!
 //!   * PASS — `all tests passed!` (the `defmt-test` completion line) or
-//!     `TEST RESULT: PASS` (the plain-`defmt` sentinel used by `tests/uart_peripheral`)
+//!     `TEST RESULT: PASS` (the plain-`defmt` sentinel used by the bins in `tests/`)
 //!   * FAIL — `TEST RESULT: FAIL`, a panic (`panicked at`), or `test failed`
 //!     (a `defmt-test` assertion failure)
 //!

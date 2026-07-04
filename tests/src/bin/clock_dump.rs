@@ -16,7 +16,7 @@
 //!   * The console UART is built **last, from a fresh live snapshot** of the
 //!     recovered clock, so its baud is correct no matter where we ended up.
 //!
-//! Run: `cargo run --release --bin clock_dump` (from tests/clock_perf).
+//! Run: `cargo run --release --bin clock_dump` (from tests/).
 //! No external jumper. CXD5602 GPIO is 1.8 V.
 
 #![no_std]

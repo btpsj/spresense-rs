@@ -1,7 +1,8 @@
 //! On-hardware GPIO level test (Option 2 — the `defmt-test` framework).
 //!
 //! This is a `harness = false` integration test: build & run it with
-//! `cargo test --release --test gpio`. `defmt-test` only emits its entry point
+//! `cargo test --release --test gpio --no-default-features --features
+//! backing-rtc` (or `backing-timer`). `defmt-test` only emits its entry point
 //! under `cfg(test)`, which is why it lives here rather than in `src/`.
 //!
 //! Wire the header pins before running:

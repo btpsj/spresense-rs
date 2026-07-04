@@ -227,9 +227,10 @@ must clear the level interrupt anyway) for a later poll to observe.
 
 Both backings are exercised by the same examples and tests at both operating points:
 `examples/rust_gpio_wait` (boot OP) and `examples/rust_gpio_wait_lp` (LP), plus the
-`tests/gpio_levels` edge tests, each take a `backing-rtc` (default) / `backing-timer`
-feature — build the timer variant with `--no-default-features --features
-backing-timer`. The LP + timer combination is the interesting one: it proves the
+`gpio` edge tests in `tests/`, each take a `backing-rtc` / `backing-timer` feature
+(default in the examples; in the tests crate both are selected with
+`--no-default-features --features backing-*`). The LP + timer combination is the
+interesting one: it proves the
 ~488 µs settle is held correctly even though the SP804's rate was sampled at the
 slow LP base clock.
 
@@ -293,7 +294,7 @@ GPIO edge-arm settle routes through whichever backend is active, so `wait_for_*_
 needs the same forwarding.
 
 **Exercised by** `examples/rust_embassy_time` (four concurrent one-shot timers + a
-periodic tick) and `tests/embassy_time` (monotonic `now`, elapsed vs an independent
+periodic tick) and the `time` test in `tests/` (monotonic `now`, elapsed vs an independent
 raw-RTC oracle, concurrent ordering), each with a `time-rtc` (default) / `time-timer` /
 `low-power` feature — both backings at both operating points. The cross-OP check is
 that the timings are identical at HP and LP: trivially for the perf-invariant RTC, and
@@ -373,8 +374,8 @@ flight, never starving the shift register mid-call — the same technique as Nut
 `cxd56_spi.c spi_exchange` and rp2040-hal's transfer loop. The earlier word-at-a-time
 implementation blocked on `RNE` after each byte, draining the FIFO and pulsing CS between
 every byte, which would abort any multi-byte SD command. `examples/rust_sd_spi` exercises
-this end-to-end (CMD0/CMD8/ACMD41/CMD58), and `tests/spi_loopback` covers the pipelined
-path in isolation.
+this end-to-end (CMD0/CMD8/ACMD41/CMD58), and the `spi` test in `tests/` covers the
+pipelined path in isolation.
 
 References: CXD5602 User Manual §3.10.5 SPI5 / §3.10.6.2 (pp. 936–948); NuttX
 `arch/arm/src/cxd56xx/cxd56_pinconfig.c` (`GROUP_EMMCA`, `cxd56_pin_configs`),

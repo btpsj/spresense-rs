@@ -1,9 +1,11 @@
 //! On-hardware GPIO level test driven entirely through the **embassy** HAL.
 //!
-//! Mirrors `tests/gpio_levels/` (same `defmt-test` shape, same wiring) but
-//! depends only on `embassy-cxd56` — no `cxd56-hal` / `cxd56-pac-svd2rust`.
-//! Asserts that a GPIO input tied to 1.8 V reads High and one tied to GND reads
-//! Low. `harness = false` because `defmt-test` only emits its entry under
+//! Mirrors the `gpio` test's level checks (same `defmt-test` shape, same
+//! wiring) but depends only on `embassy-cxd56` — no `cxd56-hal` /
+//! `cxd56-pac-svd2rust` (build & run it with `cargo test --release --test
+//! gpio_embassy --no-default-features --features embassy-pac`). Asserts that a
+//! GPIO input tied to 1.8 V reads High and one tied to GND reads Low.
+//! `harness = false` because `defmt-test` only emits its entry under
 //! `cfg(test)`.
 
 #![no_std]
