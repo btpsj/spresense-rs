@@ -8,7 +8,7 @@ use embedded_io;
 use fugit::Hertz;
 use thiserror::Error;
 
-use crate::clocks::{Clock, ClockError, PeripheralId};
+use crate::clocks::{Clock, ClockError, ClockRef, PeripheralId};
 use crate::gpio::GpioPin;
 use crate::pac;
 use crate::regs::topreg;
@@ -152,7 +152,7 @@ mod sealed {
     use fugit::Hertz;
 
     use super::pac;
-    use crate::clocks::{Clock, PeripheralId};
+    use crate::clocks::{Clock, ClockRef, PeripheralId};
 
     pub trait Sealed {
         const ID: PeripheralId;
@@ -171,6 +171,11 @@ mod sealed {
         /// Sample this peripheral's base clock. Returns a `Copy` [`Hertz`] so
         /// the borrow of `clock` ends here; any lifetime tie lives in `Output`.
         fn base_hz(clock: &Clock) -> Hertz<u32>;
+
+        /// Sample this peripheral's base clock from a shared [`ClockRef`]
+        /// (Option-2 path). Used by [`Uart::from_ref`]; does an `Acquire`
+        /// atomic load for perf-dependent clocks.
+        fn base_hz_ref(clock: &ClockRef) -> Hertz<u32>;
     }
 }
 
@@ -260,6 +265,10 @@ impl sealed::Sealed for pac::Uart1 {
     fn base_hz(clock: &Clock) -> Hertz<u32> {
         clock.com().hz()
     }
+
+    fn base_hz_ref(clock: &ClockRef) -> Hertz<u32> {
+        clock.com()
+    }
 }
 impl UartPeriph for pac::Uart1 {
     // COM is Dyn — Output<'clk> = Uart<'clk, _>; the returned Uart borrows the
@@ -301,6 +310,10 @@ impl sealed::Sealed for pac::Uart2 {
     }
     fn base_hz(clock: &Clock) -> Hertz<u32> {
         clock.img_uart().hz()
+    }
+
+    fn base_hz_ref(clock: &ClockRef) -> Hertz<u32> {
+        clock.img_uart()
     }
 }
 impl UartPeriph for pac::Uart2 {
@@ -581,6 +594,67 @@ impl<'clk, U: UartPeriph> Uart<'clk, U> {
             .expect("PL011 base address is null");
         let inner = pl011::Uart::new(unsafe { pl011::UniqueMmioPointer::new(ptr) });
         U::wrap(inner, tx.uart, pins)
+    }
+}
+
+impl<U: UartPeriph> Uart<'static, U> {
+    /// Construct from a shared [`ClockRef`] (Option-2 path), always returning
+    /// `Uart<'static, U>` regardless of whether `U`'s clock is fixed or dynamic.
+    ///
+    /// Unlike [`Uart::new`], this holds no borrow of a [`Clock`], so the borrow
+    /// checker does **not** prevent
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
+    /// while this `Uart` is alive. Use it when the peripheral must be `'static`
+    /// (embassy tasks, a `static` defmt-serial logger) and runtime operating-
+    /// point changes are coordinated by the application.
+    ///
+    /// # Caller responsibilities
+    ///
+    /// The baud divisor is computed from the clock rate **at construction** and
+    /// is not updated afterwards. Before calling
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
+    /// for a UART on a perf-dependent clock (UART1→COM, UART2→IMG_UART), drain
+    /// in-flight TX with [`flush`](Uart::flush); after the change, rebuild the
+    /// `Uart` with `from_ref` so its divisor matches the new rate. A perf change
+    /// mid-transmission garbles the in-flight byte (a correctness issue, not
+    /// undefined behaviour).
+    ///
+    /// # Example
+    /// ```ignore
+    /// use static_cell::StaticCell;
+    /// static CLOCK: StaticCell<ClockRef> = StaticCell::new();
+    ///
+    /// let crg = dp.crg.constrain(Config::default());
+    /// let clock_ref = CLOCK.init(ClockRef::from_crg(&crg));
+    /// let perf_ctl = crg.into_perf_control(clock_ref);
+    /// let uart = Uart::from_ref(pac.uart1, pins, Default::default(), clock_ref)?;
+    /// ```
+    pub fn from_ref(
+        uart: U,
+        pins: U::Pins,
+        config: UartConfig,
+        clock: &'static ClockRef,
+    ) -> Result<Self, UartError> {
+        let hz = U::base_hz_ref(clock);
+        U::ID.enable()?;
+        U::pinmux();
+        // SAFETY: identical to `Uart::new` — `U::regs()` is the fixed,
+        // properly-aligned, 'static-valid PL011 MMIO base for this peripheral,
+        // and the PAC token `uart` was consumed above so no other alias exists.
+        let ptr = NonNull::new(U::regs() as *mut pl011::PL011Registers)
+            .expect("PL011 base address is null");
+        let mut inner = pl011::Uart::new(unsafe { pl011::UniqueMmioPointer::new(ptr) });
+        inner.enable(line_config(&config), config.baud_rate, hz.to_Hz())?;
+        if config.loopback {
+            // SAFETY: as in `Uart::new` — fixed PL011 base, no other alias.
+            unsafe { &*U::regs() }.cr().modify(|_, w| w.lbe().set_bit());
+        }
+        Ok(Uart {
+            inner,
+            uart,
+            pins,
+            _life: PhantomData,
+        })
     }
 }
 
