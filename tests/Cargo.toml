@@ -1,0 +1,100 @@
+[package]
+name = "cxd56-hw-tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone workspace so the test crate builds independently of the repo
+# workspace (same convention as examples/*).
+[workspace]
+
+# Plain-defmt bins (cargo run --release --bin <name>); print TEST RESULT: PASS/FAIL.
+# required-features keeps them out of embassy-pac-only builds (cargo auto-builds
+# bins whenever an integration test is built).
+[[bin]]
+name = "clock_perf"
+required-features = ["hal"]
+
+[[bin]]
+name = "clock_dump"
+required-features = ["hal"]
+
+[[bin]]
+name = "uart_peripheral"
+required-features = ["hal"]
+
+# defmt-test integration tests (cargo test --release --test <name>). NEVER bare
+# `cargo test`: lib/bin unit-test targets need libtest, absent on no_std.
+[[test]]
+name = "time"
+harness = false
+required-features = ["_time-driver"]
+
+[[test]]
+name = "gpio"
+harness = false
+required-features = ["_async-delay"]
+
+[[test]]
+name = "pwm"
+harness = false
+required-features = ["_async-delay"]
+
+[[test]]
+name = "spi"
+harness = false
+required-features = ["hal"]
+
+[[test]]
+name = "i2s"
+harness = false
+required-features = ["hal"]
+
+[[test]]
+name = "gpio_embassy"
+harness = false
+required-features = ["embassy-pac"]
+
+# cxd56-hal allows EXACTLY ONE async-time backend (compile_error! otherwise), so
+# per invocation enable exactly one of time-rtc/time-timer/backing-rtc/backing-timer.
+# Defaults match what the old per-crate defaults resolved for the bins and the
+# time/spi/i2s tests. gpio/pwm: --no-default-features --features backing-*;
+# gpio_embassy: --no-default-features --features embassy-pac.
+[features]
+default = ["hal", "time-rtc"]
+hal = ["dep:cxd56-hal"]
+embassy-pac = ["dep:embassy-cxd56"]
+time-rtc = ["hal", "_time-driver", "dep:embassy-time", "cxd56-hal/time-driver-rtc", "embassy-time/tick-hz-32_768"]
+time-timer = ["hal", "_time-driver", "dep:embassy-time", "cxd56-hal/time-driver-timer", "embassy-time/tick-hz-1_000_000"]
+backing-rtc = ["hal", "_async-delay", "cxd56-hal/async-delay-rtc"]
+backing-timer = ["hal", "_async-delay", "cxd56-hal/async-delay-timer"]
+external-loopback = []
+low-power = []
+# Internal markers for required-features ("rtc OR timer" isn't expressible in an
+# AND-list). Never enable directly.
+_time-driver = []
+_async-delay = []
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = 2
+panic = "abort"
+
+[dependencies]
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+defmt = "1.1.0"
+defmt-serial = "0.13"
+defmt-test = "0.5.0"
+embedded-hal = "1.0.0"
+fugit = "0.3"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+static_cell = "2.1.1"
+cxd56-hal = { version = "0.1.0", path = "../cxd56-hal", default-features = false, features = ["rt", "critical-section"], optional = true }
+embassy-cxd56 = { version = "0.1.0", path = "../embassy-cxd56", optional = true }
+embassy-time = { version = "0.5.1", default-features = false, features = ["generic-queue-64"], optional = true }

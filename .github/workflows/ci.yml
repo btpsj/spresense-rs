@@ -107,7 +107,7 @@ jobs:
           done
           exit $fail
 
-  # ---- standalone on-hardware test crates (compile only) ----
+  # ---- standalone on-hardware tests crate (compile only) ----
   tests:
     name: Tests (compile-only + clippy)
     runs-on: ubuntu-latest
@@ -118,39 +118,34 @@ jobs:
           targets: thumbv7em-none-eabihf
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      # Compile-only (no board in CI). Build the harness=false integration tests
-      # by name: a plain `cargo test` would also build the crate's lib unit-test
-      # target, which pulls in the `test` crate + a panic handler that do not
-      # exist on a no_std target. --no-run builds the firmware without invoking
-      # the flash runner. Bin-style crates (no tests/*.rs) just build.
-      - name: Compile every test crate
+      # Compile-only (no board in CI). Always select tests by name (--test <t>):
+      # a bare `cargo test` would also build the lib/bin unit-test targets,
+      # which pull in the `test` crate + a panic handler that do not exist on a
+      # no_std target. --no-run builds the firmware without invoking the flash
+      # runner. gpio/pwm and gpio_embassy need non-default features: cxd56-hal
+      # allows exactly one async-time backend per build, and gpio_embassy links
+      # embassy-cxd56 instead of cxd56-hal.
+      - name: Compile the unified test crate
+        working-directory: tests
         run: |
-          fail=0
-          for d in tests/*/; do
-            echo "::group::compile $d"
-            (
-              cd "$d"
-              if ls tests/*.rs >/dev/null 2>&1; then
-                for t in tests/*.rs; do
-                  cargo test --release --no-run --test "$(basename "$t" .rs)"
-                done
-              else
-                cargo build --release
-              fi
-            ) || { echo "::error::compile failed: $d"; fail=1; }
-            echo "::endgroup::"
-          done
-          exit $fail
-      - name: Clippy every test crate (advisory)
+          set -e
+          cargo build --release
+          cargo test --release --no-run --test time
+          cargo test --release --no-run --test spi
+          cargo test --release --no-run --test i2s
+          cargo test --release --no-run --test gpio --no-default-features --features backing-rtc
+          cargo test --release --no-run --test pwm  --no-default-features --features backing-rtc
+          cargo test --release --no-run --test gpio_embassy --no-default-features --features embassy-pac
+      # No --tests/--all-targets here: they would include the libtest-requiring
+      # unit-test targets (same no_std constraint as above).
+      - name: Clippy the test crate (advisory)
         continue-on-error: true
+        working-directory: tests
         run: |
-          fail=0
-          for d in tests/*/; do
-            echo "::group::cargo clippy $d"
-            ( cd "$d" && cargo clippy -- -D warnings ) || { echo "::error::clippy failed: $d"; fail=1; }
-            echo "::endgroup::"
-          done
-          exit $fail
+          set -e
+          cargo clippy --release --bins --test time --test spi --test i2s -- -D warnings
+          cargo clippy --release --no-default-features --features backing-rtc --test gpio --test pwm -- -D warnings
+          cargo clippy --release --no-default-features --features embassy-pac --test gpio_embassy -- -D warnings
 
   # ---- rustfmt (advisory: the repo is largely hand-formatted) ----
   fmt:
@@ -175,7 +170,7 @@ jobs:
         continue-on-error: true
         run: |
           fail=0
-          for d in examples/*/ tests/*/; do
+          for d in examples/*/ tests/; do
             echo "::group::cargo fmt --check $d"
             ( cd "$d" && cargo fmt --check ) || { echo "::error::fmt drift: $d"; fail=1; }
             echo "::endgroup::"
