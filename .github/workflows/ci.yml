@@ -1,6 +1,7 @@
 name: CI
 
-# Builds the whole repo on every push / PR:
+# Builds the whole repo on every push to main, or on manual dispatch
+# (Actions → CI → Run workflow, any branch):
 #   * the root workspace — embedded library crates for thumbv7em-none-eabihf
 #     plus the host-side flashing tools,
 #   * the standalone examples workspace (one member per link-level
@@ -18,7 +19,8 @@ name: CI
 
 on:
   push:
-  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
