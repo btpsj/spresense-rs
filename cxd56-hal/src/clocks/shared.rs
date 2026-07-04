@@ -69,6 +69,14 @@ pub struct ClockRef {
     img_spi:   AtomicU32,
     img_wspi:  AtomicU32,
     img_vsync: AtomicU32,
+    // Monotonic counter bumped once per `resample` (i.e. per applied perf/gear
+    // change). The `Release` store in `resample` publishes the rate stores above
+    // it; an `Acquire` load in `generation` that observes a new value is
+    // guaranteed to also see the new rates. Lets `from_ref` peripherals detect a
+    // stale divisor and call `reconfigure` (the pull model) without this struct
+    // storing any per-peripheral state. (`gen` is a reserved keyword in edition
+    // 2024, hence `gen_counter`.)
+    gen_counter: AtomicU32,
 }
 
 impl ClockRef {
@@ -110,6 +118,7 @@ impl ClockRef {
             img_spi:   AtomicU32::new(c.img_spi.to_Hz()),
             img_wspi:  AtomicU32::new(c.img_wspi.to_Hz()),
             img_vsync: AtomicU32::new(c.img_vsync.to_Hz()),
+            gen_counter: AtomicU32::new(0),
         }
     }
 
@@ -134,6 +143,9 @@ impl ClockRef {
         self.img_spi.store(c.img_spi.to_Hz(),     Ordering::Release);
         self.img_wspi.store(c.img_wspi.to_Hz(),   Ordering::Release);
         self.img_vsync.store(c.img_vsync.to_Hz(), Ordering::Release);
+        // Bump last: this `Release` publishes every rate store above to any
+        // `Acquire` reader of `generation`.
+        self.gen_counter.fetch_add(1, Ordering::Release);
     }
 
     /// COM-bus clock (UART1 / SPI0 / I2C2). Perf-dependent; changes with `request_perf`.
@@ -199,6 +211,24 @@ impl ClockRef {
     /// IMG VSYNC clock. Perf-dependent.
     pub fn img_vsync(&self) -> Hertz<u32> {
         Hertz::<u32>::Hz(self.img_vsync.load(Ordering::Acquire))
+    }
+
+    /// Monotonic generation counter, incremented once each time the operating
+    /// point or a gear divisor is applied (every [`PerfControl`] mutation that
+    /// resamples). It lets a peripheral built with `from_ref` detect that its
+    /// cached baud/SCK divisor is stale and call `reconfigure` exactly once per
+    /// change — without this crate storing any per-peripheral state:
+    ///
+    /// ```ignore
+    /// let mut last = clock.generation();
+    /// // ... after perf_ctl.request_perf(...):
+    /// if clock.generation() != last {
+    ///     uart.reconfigure(&config, clock)?;
+    ///     last = clock.generation();
+    /// }
+    /// ```
+    pub fn generation(&self) -> u32 {
+        self.gen_counter.load(Ordering::Acquire)
     }
 }
 
