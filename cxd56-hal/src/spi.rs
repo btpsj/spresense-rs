@@ -440,6 +440,28 @@ impl<S: SpiPeriph> Spi<'static, S> {
         Self::configure_pl022(&spi, &config, base)?;
         Ok(Spi { spi, pins, _life: PhantomData })
     }
+
+    /// Rewrite the SCK divisor in place for the current operating point.
+    ///
+    /// Waits for the SSP to go idle, then re-runs the PL022 baud programming
+    /// from the live `img_wspi` rate in `clock`, so an existing `'static` SPI
+    /// can follow a
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
+    /// without being dropped and rebuilt. Stateless — gate the call on
+    /// [`ClockRef::generation`](crate::clocks::ClockRef::generation) changing,
+    /// as for [`Uart::reconfigure`](crate::uart::Uart::reconfigure).
+    ///
+    /// Finish any in-flight transfer before the perf change; this reprograms the
+    /// divisor for the *new* rate afterwards.
+    pub fn reconfigure(&mut self, config: &SpiConfig, clock: &ClockRef) -> Result<(), SpiError> {
+        // Quiesce: wait for the SSP to drain before changing divisors.
+        let mut retry = 1_000_000u32;
+        while self.spi.sspsr().read().bsy().bit_is_set() {
+            retry = retry.checked_sub(1).ok_or(SpiError::Timeout)?;
+        }
+        let base = S::base_hz_ref(clock).to_Hz();
+        Self::configure_pl022(&self.spi, config, base)
+    }
 }
 
 impl<S: SpiPeriph> Drop for Spi<'_, S> {
