@@ -45,12 +45,14 @@ pub mod pm;
 pub mod profile;
 pub mod pmu;
 pub mod reset;
+pub mod shared;
 pub mod sources;
 
 pub use audio::{AudMclk, audio_clock_disable, audio_clock_enable};
 pub use peripheral::{ClockError, GearError, I2cPort, PeripheralId, SpiPort};
 pub use pm::{PmError, Perf};
 pub use profile::{Clock, Dyn, Fixed};
+pub use shared::{ClockRef, PerfControl};
 
 /// Board-level clock configuration.
 ///
@@ -151,6 +153,29 @@ impl Crg {
     /// [`Clock::request_perf`] for runtime operating-point changes.
     pub fn into_clock(self) -> Clock {
         Clock::new(self)
+    }
+
+    /// Consume this `Crg` and produce a [`PerfControl`] bound to `shared`, the
+    /// shared-clock (Option-2) path for `'static` peripherals.
+    ///
+    /// `shared` must have been initialised from this same `Crg` via
+    /// [`ClockRef::from_crg`] and placed in `'static` storage. Unlike
+    /// [`into_clock`](Self::into_clock), the returned [`PerfControl`] holds no
+    /// borrow of the clock state — `shared` and `perf_ctl` are independent, so
+    /// peripherals built with `from_ref(shared)` are `'static`. See
+    /// [`PerfControl`] for the safety contract around runtime perf changes.
+    ///
+    /// ```ignore
+    /// use static_cell::StaticCell;
+    /// static CLOCK: StaticCell<ClockRef> = StaticCell::new();
+    ///
+    /// let crg = dp.crg.constrain(Config::default());
+    /// let clock_ref: &'static ClockRef = CLOCK.init(ClockRef::from_crg(&crg));
+    /// let perf_ctl = crg.into_perf_control(clock_ref);
+    /// let uart = Uart::from_ref(pac.uart1, pins, Default::default(), clock_ref)?;
+    /// ```
+    pub fn into_perf_control(self, shared: &'static ClockRef) -> PerfControl {
+        PerfControl::new(shared, self.cfg)
     }
 
     /// Access the raw PMU sequencer (escape hatch for SCU firmware load etc.).
