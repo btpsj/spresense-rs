@@ -4,7 +4,7 @@ use cortex_m::delay::Delay as SystDelay;
 use cortex_m::peripheral::SYST;
 use embedded_hal::delay::DelayNs;
 
-use crate::clocks::Clock;
+use crate::clocks::{Clock, ClockRef};
 
 /// SysTick-backed delay implementing [`DelayNs`], calibrated against the APP
 /// core (Cortex-M4) clock.
@@ -68,6 +68,19 @@ impl Delay<'static> {
             inner: SystDelay::new(syst, sysclk_hz),
             _life: PhantomData,
         }
+    }
+
+    /// Create a `Delay` calibrated from a shared [`ClockRef`] (Option-2 path),
+    /// always `'static`.
+    ///
+    /// Reads the current `appsmp` (APP core) frequency with an `Acquire` load
+    /// and forwards to [`with_clock`](Self::with_clock). Holds no [`Clock`]
+    /// borrow, so it does **not** block
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf).
+    /// The calibration is fixed at construction: after a perf change the delay
+    /// scaling is wrong — drop and rebuild with `from_ref` to recalibrate.
+    pub fn from_ref(syst: SYST, clock: &'static ClockRef) -> Self {
+        Self::with_clock(syst, clock.appsmp().to_Hz())
     }
 }
 
