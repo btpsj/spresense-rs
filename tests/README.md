@@ -64,6 +64,7 @@ Run everything from `tests/`:
 | `uart_peripheral` | bin | `cargo run --release --bin uart_peripheral` | none |
 | ↳ external loopback | | `… --features external-loopback` | JP1 D01↔D00 |
 | `clock_perf` | bin | `cargo run --release --bin clock_perf` | none |
+| `gnss_smoke` | bin | `cargo run --release --bin gnss_smoke` | none (gnssfw in flash) |
 | `clock_dump` | bin (diagnostic) | `cargo run --release --bin clock_dump` | none |
 | `time` | defmt-test | `cargo test --release --test time` | none |
 | ↳ SP804 backing | | `… --no-default-features --features time-timer` | none |
@@ -132,6 +133,24 @@ the restored-HP console.
 the raw root-clock-tree registers across an HP→LV→HV excursion and dumps them
 with the PM FIFO message log, building the console from the *live* clock so the
 baud is correct wherever the excursion ended.
+
+### `gnss_smoke` — GNSS bring-up (plain `defmt`, bin)
+
+Desk-runnable (no sky view, no wiring): exercises the whole non-RF surface of
+`cxd56_hal::gnss` against the real firmware stack. Requires Sony's standard
+firmware set in SPI flash (`gnssfw`); a board without it fails step [1] with
+`Firmware(-2)`.
+
+- `[1] boot`      — SYSIOP loads `gnssfw`, GPS CPU boots, the driver answers
+  the firmware's backup-restore requests, BOOTCOMP arrives.
+- `[2] version`   — `gnssfw` version word from Backup SRAM (logged only).
+- `[3] systems`   — `select_systems(GPS|GLONASS)` / `systems()` round-trip:
+  a full RPC in/out through the GNSS CPU, the proof the Far API routing
+  (modid 8 / cpu 1) is right.
+- `[4] operation` — `set_operation(Normal, 1000)` / `operation()` round-trip.
+- `[5] epochs`    — cold start, two 1 s epoch notifications, `read_position`,
+  stop. Indoors the fix stays invalid; only the mechanics are asserted.
+- `[6] shutdown`  — GPS CPU back to cold sleep.
 
 ### `time` — embassy time driver (defmt-test)
 

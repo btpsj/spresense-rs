@@ -91,6 +91,10 @@ fn test_table() -> Vec<Test> {
             variants: vec![no_feat("", vec!["run", "--release", "--bin", "clock_perf"])],
         },
         Test {
+            name: "gnss_smoke",
+            variants: vec![no_feat("", vec!["run", "--release", "--bin", "gnss_smoke"])],
+        },
+        Test {
             name: "uart_peripheral",
             variants: vec![
                 no_feat(
