@@ -54,7 +54,7 @@ use embedded_hal::spi::{ErrorType, Mode, SpiBus, MODE_0};
 use fugit::Hertz;
 use thiserror::Error;
 
-use crate::clocks::{Clock, ClockError, PeripheralId};
+use crate::clocks::{Clock, ClockError, ClockRef, PeripheralId};
 use crate::gpio::GpioPin;
 use crate::pac;
 use crate::regs::topreg;
@@ -143,7 +143,7 @@ mod sealed {
 
     use fugit::Hertz;
 
-    use crate::clocks::{Clock, PeripheralId};
+    use crate::clocks::{Clock, ClockRef, PeripheralId};
     use crate::pac;
 
     /// Private trait that bounds [`super::SpiPeriph`].
@@ -166,6 +166,11 @@ mod sealed {
         /// Returns a `Copy` [`Hertz`] so the borrow of `clock` ends here; the
         /// lifetime tie lives in `Output`
         fn base_hz(clock: &Clock) -> Hertz<u32>;
+
+        /// Sample this peripheral's base clock from a shared [`ClockRef`]
+        /// (Option-2 path). Used by [`super::Spi::from_ref`]; does an `Acquire`
+        /// atomic load for perf-dependent clocks.
+        fn base_hz_ref(clock: &ClockRef) -> Hertz<u32>;
     }
 }
 
@@ -224,6 +229,10 @@ impl sealed::Sealed for pac::Spi5 {
         // (Config::gear) — the same value spi5_enable() programs — so the
         // snapshot is correct without re-reading hardware.
         clock.img_wspi().hz()
+    }
+
+    fn base_hz_ref(clock: &ClockRef) -> Hertz<u32> {
+        clock.img_wspi()
     }
 }
 
@@ -286,7 +295,16 @@ impl<'clk, S: SpiPeriph> Spi<'clk, S> {
         S::pinmux();
         // Base clock from the Clock snapshot (configured gear divisor).
         let base = S::base_hz(clock).to_Hz();
+        Self::configure_pl022(&spi, &config, base)?;
+        Ok(S::wrap(spi, pins))
+    }
 
+    /// Program the PL022 SSP registers for the `base` clock and `config`.
+    ///
+    /// Shared by [`Spi::new`] (borrow-checked path) and [`Spi::from_ref`]
+    /// (Option-2 `'static` path) — the constructors differ only in where `base`
+    /// is sampled from.
+    fn configure_pl022(spi: &S, config: &SpiConfig, base: u32) -> Result<(), SpiError> {
         // Disable SSP before (re)configuration. PL022 requires SSE=0 to safely
         // write SSPCR0, SSPCPSR, or change LBM. We zero the whole register.
         spi.sspcr1().write(|w| unsafe { w.bits(0) });
@@ -320,7 +338,7 @@ impl<'clk, S: SpiPeriph> Spi<'clk, S> {
         let cr1 = if config.loopback { 0b0011u32 } else { 0b0010u32 };
         spi.sspcr1().write(|w| unsafe { w.bits(cr1) });
 
-        Ok(S::wrap(spi, pins))
+        Ok(())
     }
 
     // FIFO-pipelined full-duplex transfer of `len` words.
@@ -390,6 +408,37 @@ impl<'clk, S: SpiPeriph> Spi<'clk, S> {
         let spi = unsafe { core::ptr::read(&md.spi) };
         let pins = unsafe { core::ptr::read(&md.pins) };
         (spi, pins)
+    }
+}
+
+impl<S: SpiPeriph> Spi<'static, S> {
+    /// Construct from a shared [`ClockRef`] (Option-2 path), always returning
+    /// `Spi<'static, S>`.
+    ///
+    /// Unlike [`Spi::new`], this holds no borrow of a [`Clock`], so the borrow
+    /// checker does **not** prevent
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
+    /// while this `Spi` is alive. Use it when the peripheral must be `'static`
+    /// (embassy tasks) and runtime operating-point changes are coordinated by
+    /// the application.
+    ///
+    /// # Caller responsibilities
+    ///
+    /// SPI5's base clock (`img_wspi`) is perf-dependent. The SCK divisors are
+    /// computed at construction and not updated afterwards; after a
+    /// [`PerfControl::request_perf`](crate::clocks::PerfControl::request_perf)
+    /// they are stale. Finish any in-flight transfer, then rebuild the `Spi`
+    /// with `from_ref` so the SCK rate matches the new operating point. A perf
+    /// change mid-transfer corrupts the in-flight word (a correctness issue,
+    /// not undefined behaviour).
+    pub fn from_ref(spi: S, pins: S::Pins, config: SpiConfig, clock: &'static ClockRef)
+        -> Result<Self, SpiError>
+    {
+        S::ID.enable()?;
+        S::pinmux();
+        let base = S::base_hz_ref(clock).to_Hz();
+        Self::configure_pl022(&spi, &config, base)?;
+        Ok(Spi { spi, pins, _life: PhantomData })
     }
 }
 
