@@ -209,6 +209,16 @@ pub struct Output<R: PinReg> {
     reg: &'static R,
 }
 
+// SAFETY: an `Output` exclusively owns its pin's GP_* data register (and the
+// paired per-pin IO_* pad register), and every method touches only those two —
+// no shared TOPREG register is reached — so moving the configured pin to
+// another core (e.g. into a `multicore::spawn` closure) cannot race any other
+// pin or driver. `&'static R` alone is `!Send` only because the svd2rust `Reg`
+// cell is `!Sync`; the exclusive-ownership contract of the pin token restores
+// the soundness of the move. Deliberately NOT `Sync`: sharing one pin between
+// cores would allow concurrent read-modify-writes of a single register.
+unsafe impl<R: PinReg> Send for Output<R> {}
+
 impl<R: PinReg> Output<R> {
     pub fn set_high(&mut self) {
         let raw = self.reg.read_bits() | OUT_BIT;
@@ -264,6 +274,14 @@ impl<R: PinReg> embedded_hal::digital::StatefulOutputPin for Output<R> {
 pub struct Input<R: PinReg> {
     reg: &'static R,
 }
+
+// SAFETY: as for `Output` — an `Input` exclusively owns its pin's GP_* and
+// IO_* registers and touches nothing shared (`set_pull` RMWs the per-pin IO_*
+// register only), so the configured pin may move to another core. Convert to
+// [`InterruptInput`] only on the core that will service the interrupt:
+// `into_interrupt` programs the shared EXDEVICE routing and its wakers are
+// core-local, which is why `InterruptInput` itself stays `!Send`.
+unsafe impl<R: PinReg> Send for Input<R> {}
 
 impl<R: PinReg> Input<R> {
     pub fn is_high(&self) -> bool {
