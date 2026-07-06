@@ -39,11 +39,15 @@
 //!
 //! # Polling, not interrupts
 //!
-//! Like [`crate::clocks::pm`], this polls the CPU FIFO. [`call`] drops any
-//! unrelated messages it sees while waiting; [`call_to`] hands them to a caller
-//! sink instead, so protocols with unsolicited firmware→app notifications (GNSS)
-//! don't lose events that land while an RPC is in flight. Do not issue a Far API
-//! call concurrently with other CPU-FIFO traffic.
+//! Like [`crate::clocks::pm`], this polls the CPU FIFO — with `FIFO_FROM`
+//! masked (`multicore::mailbox::with_rx_claimed`) for the bounded duration, so
+//! an armed async [`Inbox`](crate::multicore::Inbox) cannot steal the
+//! completion event. Stray user proto-14 messages pulled while waiting are
+//! stashed into that inbox rather than dropped; [`call`] drops other unrelated
+//! traffic, while [`call_to`] hands it to a caller sink, so protocols with
+//! unsolicited firmware→app notifications (GNSS) don't lose events that land
+//! while an RPC is in flight. Do not poll the raw [`Mailbox`] concurrently on
+//! this core.
 //!
 //! # Timeout hazard
 //!
@@ -55,13 +59,15 @@
 //! every word the firmware touches lives in `'static` (or otherwise immortal)
 //! memory.
 
-use crate::multicore::Mailbox;
 use crate::multicore::cpu;
+use crate::multicore::{Mailbox, mailbox};
 
 // --- ICC protocol ids (cxd56_icc.h) -----------------------------------------
 
 const PROTO_MBX: u32 = 1;
 const PROTO_FLG: u32 = 3;
+/// The user mailbox protocol ([`crate::multicore`]); strays are stashed, not dropped.
+const PROTO_USER: u32 = 14;
 
 /// The SYSIOP core is CPU 0 — the `_modulelist_*` entries for the PMIC/sleep/
 /// ACA-style modules in `cxd56_farapistub.S` all have `cpuno == 0`. The GNSS
@@ -178,65 +184,83 @@ pub fn call_to(
     // (a compiler fence alone does not order the writes for another master).
     cortex_m::asm::dmb();
 
-    // Send request: cxd56_sendmsg(cpuno, PROTO_MBX, msgtype=4, pdata=1<<8|1,
-    // &msg). msgid = msgtype << 4 = 0x40. Drain inbound while the push FIFO
-    // is full instead of spinning blind — a blocking push can deadlock
-    // against the far side pushing to us (hardware-verified on the GNSS
-    // signal path). Nothing received before the request is our completion,
-    // so everything drained here is unrelated traffic for `on_other`.
-    let req_w0 = pack_word0(dest_cpu, PROTO_MBX, 4 << 4, (1 << 8) | 1);
-    let req = [req_w0, (&mut msg as *mut FarMsg) as u32];
-    let mut sent = false;
-    for _ in 0..budget {
-        if Mailbox::try_send(req).is_ok() {
-            sent = true;
-            break;
-        }
-        if let Some(w) = Mailbox::try_recv() {
+    // Route a stray message pulled by one of the polling loops below: user
+    // proto-14 traffic is stashed into this core's Inbox ring (an async recv
+    // in flight across the call simply resumes afterwards); everything else
+    // goes to the caller's sink (GNSS notifications).
+    let mut route = |w: [u32; 2]| {
+        if (w[0] >> 24) & 0xf == PROTO_USER {
+            mailbox::stash_user(w);
+        } else {
             on_other(w);
         }
-        core::hint::spin_loop();
-    }
-    if !sent {
-        return Err(FarapiError::Timeout);
-    }
+    };
 
-    // Wait for the FLG completion event (`pdata & 0xf == 7`), then acknowledge
-    // it exactly as NuttX's `cxd56_farapidonehandler` does. Only one RPC is
-    // ever in flight (blocking, single-core), so any FLG with our magic is our
-    // completion regardless of which core sent it.
-    for _ in 0..budget {
-        let Some([w0, w1]) = Mailbox::try_recv() else {
-            core::hint::spin_loop();
-            continue;
-        };
-        let proto = (w0 >> 24) & 0xf;
-        if proto != PROTO_FLG || (w0 & 0xf) != FLAG_MAGIC {
-            // Unrelated FIFO traffic — the caller may care (GNSS notifications).
-            on_other([w0, w1]);
-            continue;
-        }
-        // Send event-flag response: cxd56_sendmsg(sender, PROTO_FLG, msgtype=5,
-        // pdata = received & 0xff00, 0). msgid = 5 << 4 = 0x50. Same
-        // drain-while-push discipline as the request.
-        let sender = (w0 >> 28) & 0xf;
-        let ack_w0 = pack_word0(sender, PROTO_FLG, 5 << 4, w0 & 0xff00);
-        let ack = [ack_w0, 0];
+    // Run the request push + completion poll with the RX interrupt claimed, so
+    // the async mailbox ISR cannot steal the FLG completion event out of the
+    // hardware FIFO mid-handshake.
+    mailbox::with_rx_claimed(|| {
+        // Send request: cxd56_sendmsg(cpuno, PROTO_MBX, msgtype=4, pdata=1<<8|1,
+        // &msg). msgid = msgtype << 4 = 0x40. Drain inbound while the push FIFO
+        // is full instead of spinning blind — a blocking push can deadlock
+        // against the far side pushing to us (hardware-verified on the GNSS
+        // signal path). Nothing received before the request can be the
+        // completion, so everything drained here is unrelated traffic.
+        let req_w0 = pack_word0(dest_cpu, PROTO_MBX, 4 << 4, (1 << 8) | 1);
+        let req = [req_w0, (&mut msg as *mut FarMsg) as u32];
+        let mut sent = false;
         for _ in 0..budget {
-            if Mailbox::try_send(ack).is_ok() {
-                // Order the firmware's writes to `arg` before the caller's reads.
-                cortex_m::asm::dmb();
-                return Ok(());
+            if Mailbox::try_send(req).is_ok() {
+                sent = true;
+                break;
             }
             if let Some(w) = Mailbox::try_recv() {
-                on_other(w);
+                route(w);
             }
             core::hint::spin_loop();
         }
-        // The call itself completed but the completion ack could not be
-        // pushed — the transport is dead; report it as the timeout it is.
-        return Err(FarapiError::Timeout);
-    }
+        if !sent {
+            return Err(FarapiError::Timeout);
+        }
 
-    Err(FarapiError::Timeout)
+        // Wait for the FLG completion event (`pdata & 0xf == 7`), then
+        // acknowledge it exactly as NuttX's `cxd56_farapidonehandler` does.
+        // Only one RPC is ever in flight (blocking, single-core), so any FLG
+        // with our magic is our completion regardless of which core sent it.
+        for _ in 0..budget {
+            let Some([w0, w1]) = Mailbox::try_recv() else {
+                core::hint::spin_loop();
+                continue;
+            };
+            let proto = (w0 >> 24) & 0xf;
+            if proto != PROTO_FLG || (w0 & 0xf) != FLAG_MAGIC {
+                // Unrelated FIFO traffic — stash or hand to the caller.
+                route([w0, w1]);
+                continue;
+            }
+            // Send event-flag response: cxd56_sendmsg(sender, PROTO_FLG,
+            // msgtype=5, pdata = received & 0xff00, 0). msgid = 5 << 4 = 0x50.
+            // Same drain-while-push discipline as the request.
+            let sender = (w0 >> 28) & 0xf;
+            let ack_w0 = pack_word0(sender, PROTO_FLG, 5 << 4, w0 & 0xff00);
+            let ack = [ack_w0, 0];
+            for _ in 0..budget {
+                if Mailbox::try_send(ack).is_ok() {
+                    // Order the firmware's writes to `arg` before the caller's
+                    // reads.
+                    cortex_m::asm::dmb();
+                    return Ok(());
+                }
+                if let Some(w) = Mailbox::try_recv() {
+                    route(w);
+                }
+                core::hint::spin_loop();
+            }
+            // The call itself completed but the completion ack could not be
+            // pushed — the transport is dead; report it as the timeout it is.
+            return Err(FarapiError::Timeout);
+        }
+
+        Err(FarapiError::Timeout)
+    })
 }

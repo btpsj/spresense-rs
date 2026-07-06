@@ -571,3 +571,45 @@ pub fn on_tx_interrupt() {
     TX_WAKERS[cpu::current().index() as usize].wake();
 }
 
+/// Run a blocking, polled FIFO protocol exchange (PM / FARAPI) with this
+/// core's RX interrupt held off, so [`on_rx_interrupt`] cannot steal the
+/// protocol replies out of the hardware FIFO mid-handshake.
+///
+/// Restores the previous NVIC mask state afterwards; any messages the
+/// handshake left in the hardware FIFO re-fire the level IRQ on restore, so
+/// nothing is lost. Pair with [`stash_user`] inside `f` for foreign proto-14
+/// traffic the loop pulls.
+pub(crate) fn with_rx_claimed<R>(f: impl FnOnce() -> R) -> R {
+    let was_enabled = NVIC::is_enabled(pac::Interrupt::FIFO_FROM);
+    NVIC::mask(pac::Interrupt::FIFO_FROM);
+    let r = f();
+    if was_enabled {
+        // SAFETY (non-priority-based masking): restoring the pre-claim state.
+        unsafe { NVIC::unmask(pac::Interrupt::FIFO_FROM) };
+    }
+    r
+}
+
+/// Route a raw message that a polling protocol loop pulled — but does not
+/// own — into this core's [`Inbox`] ring (proto-14 only; anything else is
+/// dropped, matching the pre-async behaviour). Ring full ⇒ the message is
+/// dropped, like any datagram overflow.
+pub(crate) fn stash_user(words: [u32; 2]) {
+    let Some(msg) = Message::from_words(words) else {
+        return;
+    };
+    let idx = cpu::current().index() as usize;
+    let pushed = critical_section::with(|cs| {
+        let mut ring = RX[idx].ring.borrow(cs).borrow_mut();
+        if ring.is_full() {
+            false
+        } else {
+            ring.push(msg);
+            true
+        }
+    });
+    if pushed {
+        RX[idx].waker.wake();
+    }
+}
+

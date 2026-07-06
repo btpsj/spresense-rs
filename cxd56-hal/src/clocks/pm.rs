@@ -23,10 +23,14 @@
 //!
 //! # Limitations
 //!
-//! This implementation **polls** the CPU FIFO (blocking). Do not run an
-//! operating-point transition while other cores are actively exchanging
-//! CPU-FIFO messages; non-PM FIFO messages received during the handshake are
-//! dropped.
+//! This implementation **polls** the CPU FIFO (blocking). The handshake runs
+//! with `FIFO_FROM` masked (`multicore::mailbox::with_rx_claimed`), so an
+//! armed async [`Inbox`](crate::multicore::Inbox) cannot steal a protocol
+//! reply, and any user proto-14 message the loop pulls is stashed into that
+//! inbox instead of dropped — an async `recv` in flight across a
+//! [`request_perf`] just resumes afterwards. Messages of *other* protocols
+//! received during the handshake are still dropped, and raw
+//! [`Mailbox`] polling must not run concurrently on this core.
 //!
 //! # References
 //!
@@ -35,7 +39,7 @@
 //! - NuttX: `arch/arm/include/cxd56xx/pm.h` (PM_CPUFREQLOCK_FLAG_*)
 //! - NuttX: `arch/arm/src/cxd56xx/cxd56_icc.h` (CXD56_PROTO_PM, message layout)
 
-use crate::multicore::Mailbox;
+use crate::multicore::{Mailbox, mailbox};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// CPU/bus performance level.
@@ -195,36 +199,43 @@ pub(crate) fn request_perf(perf: Perf) -> Result<(), PmError> {
         return Ok(());
     }
 
-    // cxd56_pmsendmsg(MSGID_FREQLOCK, flag)
-    send_pm(MSGID_FREQLOCK, flag);
+    // Drive the handshake to completion with the RX interrupt claimed: the
+    // async mailbox ISR must not steal a protocol reply mid-transition. A
+    // voltage-mode change is **multi-step** on this silicon: the SYSIOP sends
+    // several CLK_CHG_START/END pairs (3 each way, measured on CXD5602), each
+    // of which we ack, while it reconfigures the PLL/dividers and PMIC core
+    // voltage one step at a time. It then sends a trailing FREQLOCK reply that
+    // marks the whole transition complete — that is the completion signal,
+    // mirroring NuttX (`cxd56_pmmsghandler` posts the freqlock-wait semaphore
+    // only on MSGID_FREQLOCK, after the maintask has acked every CLK_CHG
+    // pair). Returning on the first CLK_CHG_END instead would strand the chip
+    // between steps at an out-of-spec operating point.
+    mailbox::with_rx_claimed(|| {
+        // cxd56_pmsendmsg(MSGID_FREQLOCK, flag)
+        send_pm(MSGID_FREQLOCK, flag);
 
-    // Drive the handshake to completion. A voltage-mode change is **multi-step**
-    // on this silicon: the SYSIOP sends several CLK_CHG_START/END pairs (3 each
-    // way, measured on CXD5602), each of which we ack, while it reconfigures the
-    // PLL/dividers and PMIC core voltage one step at a time. It then sends a
-    // trailing FREQLOCK reply that marks the whole transition complete — that is
-    // the completion signal, mirroring NuttX (`cxd56_pmmsghandler` posts the
-    // freqlock-wait semaphore only on MSGID_FREQLOCK, after the maintask has
-    // acked every CLK_CHG pair). Returning on the first CLK_CHG_END instead would
-    // strand the chip between steps at an out-of-spec operating point.
-    loop {
-        let words = Mailbox::recv_blocking();
-        let Some((proto_data, data)) = unpack_pm(words) else {
-            continue;
-        };
-        match proto_data {
-            // cxd56_pmsendmsg(MSGID_CLK_CHG_*, 0 /*ret=OK*/) — ack each step.
-            MSGID_CLK_CHG_START => send_pm(MSGID_CLK_CHG_START, 0),
-            MSGID_CLK_CHG_END => send_pm(MSGID_CLK_CHG_END, 0),
-            // Trailing reply: the whole transition is done.
-            MSGID_FREQLOCK => {
-                return if data != 0 {
-                    Err(PmError::ClockChangeFailed(data))
-                } else {
-                    Ok(())
-                };
+        loop {
+            let words = Mailbox::recv_blocking();
+            let Some((proto_data, data)) = unpack_pm(words) else {
+                // Not PM traffic: route user proto-14 messages into the local
+                // Inbox instead of dropping them (other protos still drop).
+                mailbox::stash_user(words);
+                continue;
+            };
+            match proto_data {
+                // cxd56_pmsendmsg(MSGID_CLK_CHG_*, 0 /*ret=OK*/) — ack each step.
+                MSGID_CLK_CHG_START => send_pm(MSGID_CLK_CHG_START, 0),
+                MSGID_CLK_CHG_END => send_pm(MSGID_CLK_CHG_END, 0),
+                // Trailing reply: the whole transition is done.
+                MSGID_FREQLOCK => {
+                    return if data != 0 {
+                        Err(PmError::ClockChangeFailed(data))
+                    } else {
+                        Ok(())
+                    };
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }
+    })
 }
