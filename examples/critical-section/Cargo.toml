@@ -15,3 +15,4 @@ critical-section.workspace = true
 cxd56-hal = { workspace = true, features = ["critical-section-impl", "time-driver-rtc"] }
 embedded-hal.workspace = true
 panic-halt.workspace = true
+static_cell.workspace = true

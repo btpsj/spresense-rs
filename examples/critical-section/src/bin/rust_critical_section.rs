@@ -31,13 +31,14 @@
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use cortex_m::{Peripherals, asm};
+use cortex_m::Peripherals;
 use cortex_m_rt::entry;
 use embedded_hal::delay::DelayNs;
 use panic_halt as _;
+use static_cell::ConstStaticCell;
 
 use cxd56_hal::{delay::Delay, gpio::{Level, pins}};
-use cxd56_hal::multicore::{Core, ack_boot, spawn};
+use cxd56_hal::multicore::{Cores, Stack, spawn};
 use cxd56_hal::pac;
 use cxd56_hal::uart::Uart;
 use cxd56_hal::{
@@ -59,12 +60,10 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 static CORE0_DONE: AtomicBool = AtomicBool::new(false);
 static CORE1_DONE: AtomicBool = AtomicBool::new(false);
 
-/// Worker stack — must live in shared RAM so Core1 can use it.
-/// `align(32)` matches the RP2040 convention and leaves room for a future
-/// MPU stack-guard region (minimum granularity 32 bytes on Cortex-M4).
-#[repr(C, align(32))]
-struct Stack<const N: usize>([usize; N]);
-static mut CORE1_STACK: Stack<2048> = Stack([0; 2048]); // 2048 words = 8 KiB
+/// Worker stack (8 KiB) — a shared-RAM `static` so Core1 can keep using it;
+/// `ConstStaticCell` hands out the `&'static mut` that `spawn` needs without
+/// any `unsafe`.
+static CORE1_STACK: ConstStaticCell<Stack<8192>> = ConstStaticCell::new(Stack::new());
 
 // ---------------------------------------------------------------------------
 // Core0 entry
@@ -92,13 +91,14 @@ fn main() -> ! {
 
     let _ = writeln!(uart, "critical_section contention test: N={N} per core");
 
-    // Spawn Core1.  It will `ack_boot()` and then race against us.
-    let stack_top = (core::ptr::addr_of_mut!(CORE1_STACK) as usize
-        + core::mem::size_of::<Stack<2048>>()) as u32;
-    // SAFETY: `stack_top` is the top of a uniquely-owned, 8-byte-aligned stack
-    // in shared RAM; `core1_main` is a valid `extern "C"` entry that never
-    // returns; called once from the main core only.
-    unsafe { spawn(Core::Core1, stack_top, core1_main).unwrap() };
+    // Spawn Core1; its closure races `run_iterations` against us, then parks
+    // (the HAL parks a worker whose closure returns).
+    let cores = Cores::take().unwrap();
+    spawn(cores.core1, CORE1_STACK.take(), || {
+        run_iterations();
+        CORE1_DONE.store(true, Ordering::Release);
+    })
+    .unwrap();
 
     // Core0 runs its N iterations concurrently with Core1.
     run_iterations();
@@ -137,22 +137,6 @@ fn main() -> ! {
 }
 
 // ---------------------------------------------------------------------------
-// Core1 entry
-// ---------------------------------------------------------------------------
-
-extern "C" fn core1_main() -> ! {
-    ack_boot();
-    enable_fpu();
-
-    run_iterations();
-    CORE1_DONE.store(true, Ordering::Release);
-
-    loop {
-        core::hint::spin_loop();
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Shared kernel
 // ---------------------------------------------------------------------------
 
@@ -167,21 +151,4 @@ fn run_iterations() {
             COUNTER.store(v + 1, Ordering::Relaxed);
         });
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Enable the FPU (CP10/CP11) on this core.  Required on worker cores because
-/// cortex-m-rt only enables it during Core0's reset handler.
-#[inline]
-fn enable_fpu() {
-    const CPACR: *mut u32 = 0xE000_ED88 as *mut u32;
-    unsafe {
-        let v = core::ptr::read_volatile(CPACR) | (0b1111 << 20);
-        core::ptr::write_volatile(CPACR, v);
-    }
-    asm::dsb();
-    asm::isb();
 }

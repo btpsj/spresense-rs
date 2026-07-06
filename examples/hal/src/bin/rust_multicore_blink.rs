@@ -6,6 +6,11 @@
 //! no semaphore or mailbox is needed. Two visibly out-of-phase blink rates prove
 //! that two cores are each running their own loop (not one core toggling both).
 //! This is the hardware bring-up test for `cxd56_hal::multicore::spawn`.
+//!
+//! Note what is **absent** compared to the old fn-pointer spawn: no `unsafe`,
+//! no `static mut` stack, no manual FPU enable, no `ack_boot` — LED1 is
+//! configured on `Core0` and simply *moved* into the worker closure, and the
+//! HAL's boot shim handles the rest.
 
 #![no_std]
 #![no_main]
@@ -13,23 +18,19 @@
 use cortex_m::asm;
 use cortex_m_rt::entry;
 use panic_halt as _;
+use static_cell::ConstStaticCell;
 
 use cxd56_hal::clocks::{Config, RccExt};
-use cxd56_hal::gpio::{pins, GpioPin, Level};
-use cxd56_hal::multicore::{ack_boot, spawn, Core};
+use cxd56_hal::gpio::{Level, pins};
+use cxd56_hal::multicore::{Cores, Stack, spawn};
 use cxd56_hal::pac;
 
 /// ~156 MHz APP core clock → cycles per millisecond for `asm::delay` busy-waits.
 const CYCLES_PER_MS: u32 = 156_000;
 
-/// Worker stack size in `usize` words (2048 words = 8 KiB).
-/// `align(32)` matches the RP2040 convention and leaves room for a future
-/// MPU stack-guard region (minimum granularity 32 bytes on Cortex-M4).
-const STACK_SIZE: usize = 2048;
-
-#[repr(C, align(32))]
-struct Stack<const N: usize>([usize; N]);
-static mut CORE1_STACK: Stack<STACK_SIZE> = Stack([0; STACK_SIZE]);
+/// Worker stack (8 KiB). `ConstStaticCell` hands out the `&'static mut` that
+/// `spawn` needs without any `unsafe`.
+static CORE1_STACK: ConstStaticCell<Stack<8192>> = ConstStaticCell::new(Stack::new());
 
 #[entry]
 fn main() -> ! {
@@ -39,21 +40,26 @@ fn main() -> ! {
     let crg = pac.crg.constrain(Config::default());
     let _clocks = crg.freeze();
 
-    // Core0 owns LED0 (gp_i2s1_bck). Core1 owns LED1 (gp_i2s1_lrck) — a distinct
-    // register, left unconfigured here.
+    // Configure both LEDs on Core0; LED1 then moves into the worker closure
+    // (a configured `Output` pin is `Send` — it owns only its own register).
     let pins = pins::Parts::new(pac.topreg);
     let mut led0 = pins.gp_i2s1_bck.into_output(Level::Low);
+    let mut led1 = pins.gp_i2s1_lrck.into_output(Level::Low);
 
-    // Start Core1 on its dedicated stack. `core1_main` must call `ack_boot`
-    // first and never return (see below).
-    let stack_top = (core::ptr::addr_of_mut!(CORE1_STACK) as usize
-        + core::mem::size_of::<Stack<STACK_SIZE>>()) as u32;
-    // SAFETY: `stack_top` is the top of a uniquely-owned, 32-byte-aligned stack in
-    // shared RAM; `core1_main` is a valid `extern "C"` worker entry that never
-    // returns; called once, from the main core only.
-    unsafe {
-        spawn(Core::Core1, stack_top, core1_main).unwrap();
-    }
+    // Start Core1 on its dedicated stack. `spawn` only returns once the worker
+    // has booted and released the boot mailbox.
+    let cores = Cores::take().unwrap();
+    spawn(cores.core1, CORE1_STACK.take(), move || {
+        // 200 ms period — deliberately different from Core0 so the two LEDs
+        // are visibly out of phase, proving Core1 runs independently.
+        loop {
+            led1.set_high();
+            asm::delay(200 * CYCLES_PER_MS);
+            led1.set_low();
+            asm::delay(200 * CYCLES_PER_MS);
+        }
+    })
+    .unwrap();
 
     // Core0 blink loop — 500 ms period.
     loop {
@@ -62,47 +68,4 @@ fn main() -> ! {
         led0.set_low();
         asm::delay(500 * CYCLES_PER_MS);
     }
-}
-
-/// `Core1` entry point.
-///
-/// This runs as a raw `extern "C"` function with **no** cortex-m-rt runtime:
-/// only `Core0` got the reset handler that zeroes `.bss` / copies `.data` /
-/// enables the FPU. We rely on `Core0` having initialised the shared `.bss` and
-/// `.data` (same image), and enable this core's own FPU defensively. No
-/// interrupts are used, so the worker needs no vector table.
-extern "C" fn core1_main() -> ! {
-    // Release the boot mailbox so the spawner can proceed (boot handshake).
-    ack_boot();
-    enable_fpu();
-
-    // Core1 owns LED1 (gp_i2s1_lrck) — re-derive its register directly, since the
-    // `Topreg` singleton was consumed on Core0. This is the only handle to this
-    // register, so the `GpioPin::new` exclusivity contract holds.
-    let block: &'static _ = unsafe { &*pac::Topreg::PTR };
-    // SAFETY: exclusive access — no other code touches gp_i2s1_lrck.
-    let mut led1 = unsafe { GpioPin::new(block.gp_i2s1_lrck()) }.into_output(Level::Low);
-
-    // 200 ms period — deliberately different from Core0 so the two LEDs are
-    // visibly out of phase, proving Core1 runs independently.
-    loop {
-        led1.set_high();
-        asm::delay(200 * CYCLES_PER_MS);
-        led1.set_low();
-        asm::delay(200 * CYCLES_PER_MS);
-    }
-}
-
-/// Grant the FPU (CP10/CP11) full access via CPACR. CPACR (`0xE000_ED88`) is
-/// core-private, so this enables the FPU on this worker only. Harmless if the
-/// compiler emits no floating-point instructions.
-#[inline]
-fn enable_fpu() {
-    const CPACR: *mut u32 = 0xE000_ED88 as *mut u32;
-    unsafe {
-        let v = core::ptr::read_volatile(CPACR) | (0b1111 << 20);
-        core::ptr::write_volatile(CPACR, v);
-    }
-    asm::dsb();
-    asm::isb();
 }
