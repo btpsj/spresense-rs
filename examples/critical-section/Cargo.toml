@@ -13,6 +13,9 @@ cortex-m.workspace = true
 cortex-m-rt.workspace = true
 critical-section.workspace = true
 cxd56-hal = { workspace = true, features = ["critical-section-impl", "time-driver-rtc"] }
+# rust_multicore_mailbox's concurrent ticker; the tick rate must match the
+# HAL's RTC time driver (32.768 kHz, mapped 1:1).
+embassy-time = { workspace = true, features = ["tick-hz-32_768"] }
 embedded-hal.workspace = true
 panic-halt.workspace = true
 static_cell.workspace = true
