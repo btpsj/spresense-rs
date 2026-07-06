@@ -12,7 +12,10 @@
 //!   block is the only sound cross-core mutual-exclusion primitive.
 //! - [`hw_mutex`] — [`HwMutex`], the data-guarding cross-core mutex composed
 //!   from an [`Sph`] slot + the required memory barriers.
-//! - [`mailbox`] — two-word inter-core messages over the CPU FIFO ([`Mailbox`]).
+//! - [`mailbox`] — inter-core messages over the CPU FIFO: the raw two-word
+//!   [`Mailbox`] plus the typed, interrupt-driven async [`Inbox`]/[`Outbox`]
+//!   channel ([`Message`], `FIFO_FROM`/`FIFO_TO` wakers via
+//!   [`on_rx_interrupt`]/[`on_tx_interrupt`]).
 
 pub mod cpu;
 pub mod hw_mutex;
@@ -22,6 +25,6 @@ pub mod sph;
 
 pub use cpu::{Core, current};
 pub use hw_mutex::{HwMutex, HwMutexGuard};
-pub use mailbox::{Full, Mailbox};
+pub use mailbox::{Full, Inbox, Mailbox, Message, Outbox, on_rx_interrupt, on_tx_interrupt};
 pub use spawn::{Cores, SpawnError, Stack, Worker, spawn};
 pub use sph::{COUNT, RESERVED_CS_ID, Sph};
