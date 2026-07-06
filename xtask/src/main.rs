@@ -16,7 +16,8 @@
 //!   spi_loopback          internal, external-loopback
 //!   gpio_levels           backing-rtc, backing-timer
 //!   gpio_levels_embassy   (embassy-pac: chiptool PAC, no cxd56-hal)
-//!   multicore             (default features; spawn/mailbox/HwMutex, no wiring)
+//!   multicore             default, low-power (spawn/mailbox/HwMutex; low-power
+//!                         adds the RX dispatcher under a live FREQLOCK; no wiring)
 //!
 //! Every variant flashes via the `cargo-spresense-flash ... --test` runner (see
 //! tests/.cargo/config.toml), which exits 0=PASS / 1=FAIL / 2=TIMEOUT. This
@@ -185,10 +186,16 @@ fn test_table() -> Vec<Test> {
         },
         Test {
             name: "multicore",
-            variants: vec![no_feat(
-                "",
-                vec!["test", "--release", "--test", "multicore"],
-            )],
+            variants: vec![
+                no_feat("", vec!["test", "--release", "--test", "multicore"]),
+                no_feat(
+                    "low-power",
+                    vec![
+                        "test", "--release", "--test", "multicore",
+                        "--features", "low-power",
+                    ],
+                ),
+            ],
         },
     ]
 }

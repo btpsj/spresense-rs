@@ -1,6 +1,7 @@
 //! On-hardware multicore tests: closure spawn, typed async mailbox, HwMutex.
 //!
-//! Three cases, each consuming one worker-core token:
+//! Four cases (the fourth in `--features low-power` builds only), each
+//! consuming one worker-core token:
 //!
 //! 1. `spawn_closure_captures` — a closure with moved captures runs on Core1
 //!    (`spawn` returning `Ok` proves the boot handshake; the published value
@@ -12,6 +13,14 @@
 //! 3. `hw_mutex_contention` — Core0 and Core3 hammer one `HwMutex<0, u32>`
 //!    with a deliberately non-atomic read-modify-write; an exact final count
 //!    proves the SPH lock + DMB pair provide real cross-core exclusion.
+//! 4. `dispatcher_survives_freqlock` (low-power builds) — `init` spawns Core4
+//!    streaming typed ticks and locks the Lp operating point
+//!    (`into_lp_clock`, the FREQLOCK handshake) mid-stream, before the UART
+//!    console exists (the operating point moves the COM clock under UART1);
+//!    the test asserts the recorded evidence: a gap-free tick sequence, with
+//!    the console coming up at the settled Lp point as proof the handshake
+//!    completed — the RX dispatcher routing PM replies and user datagrams
+//!    off one hardware FIFO under live SYSIOP traffic.
 //!
 //! Cross-core signalling rules in this file (the tests crate links
 //! `critical-section-single-core`, which is only core-local): cross-core data
@@ -34,11 +43,18 @@ use cxd56_hal::pac::{self, interrupt};
 use cxd56_hal::uart::Uart;
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
+// The operating point this build locks — Lp for the case-4 (low-power)
+// build, Hp otherwise (the other cases are operating-point agnostic).
+#[cfg(not(feature = "low-power"))]
 static CLOCK: StaticCell<cxd56_hal::clocks::Clock<cxd56_hal::clocks::Hp>> = StaticCell::new();
+#[cfg(feature = "low-power")]
+static CLOCK: StaticCell<cxd56_hal::clocks::Clock<cxd56_hal::clocks::Lp>> = StaticCell::new();
 
 static CORE1_STACK: ConstStaticCell<Stack<8192>> = ConstStaticCell::new(Stack::new());
 static CORE2_STACK: ConstStaticCell<Stack<8192>> = ConstStaticCell::new(Stack::new());
 static CORE3_STACK: ConstStaticCell<Stack<8192>> = ConstStaticCell::new(Stack::new());
+#[cfg(feature = "low-power")]
+static CORE4_STACK: ConstStaticCell<Stack<8192>> = ConstStaticCell::new(Stack::new());
 
 // One forwarder serves every core that arms an Inbox: the vector table is
 // shared, each core takes only the line it unmasked, and the handler drains
@@ -83,20 +99,97 @@ mod tests {
     use cxd56_hal::pac;
     use cxd56_hal::uart::{Uart, Uart1Pins};
 
-    /// Worker tokens carried across the cases; each `spawn` consumes one.
+    /// Case-4 stream parameters: Core4 sends `STREAM_TICKS` messages tagged
+    /// `TICK_MSGID`; anything else on Core0's inbox is another case's traffic.
+    #[cfg(feature = "low-power")]
+    const TICK_MSGID: u8 = 0xA5;
+    #[cfg(feature = "low-power")]
+    const STREAM_TICKS: u16 = 6;
+
+    /// Worker tokens carried across the cases (each `spawn` consumes one),
+    /// Core0's typed endpoints, and — in low-power builds — the case-4
+    /// evidence recorded in `init`.
     struct State {
         core1: Option<Worker>,
         core2: Option<Worker>,
         core3: Option<Worker>,
+        inbox: Inbox,
+        outbox: Outbox,
+        #[cfg(feature = "low-power")]
+        tick_seqs: [u16; 4],
     }
 
     #[init]
     fn init() -> State {
         let pac = unwrap!(pac::Peripherals::take());
         let crg = pac.crg.constrain(Config::default());
-        let clock = crate::CLOCK.init(crg.into_hp_clock().expect("lock Hp"));
+        // Non-LP builds lock the HP point up front (the other tests' default);
+        // the low-power build locks Lp *mid-stream* below, so `crg` stays
+        // unlocked until then.
+        #[cfg(not(feature = "low-power"))]
+        let clock = crg.into_hp_clock().expect("lock Hp");
 
-        // UART1 for defmt console output.
+        let cores = unwrap!(Cores::take());
+        // Core0's typed endpoints, taken once and shared by the cases (the
+        // take also arms FIFO_FROM through the file-scope forwarder).
+        #[allow(unused_mut)]
+        let mut inbox = unwrap!(Inbox::take());
+        let outbox = unwrap!(Outbox::take());
+
+        // Case 4 (low-power builds) runs BEFORE the console exists: the
+        // operating-point change moves the COM clock under UART1, so the
+        // transition happens first and the console is then configured
+        // against the settled rates (the tests/time.rs pattern). Failures in
+        // this phase are silent (no logger yet) and surface as the runner's
+        // timeout; the assertions run with the console live, in
+        // `dispatcher_survives_freqlock`.
+        #[cfg(feature = "low-power")]
+        let (clock, tick_seqs) = {
+            // Core4: stream typed ticks, blind to what Core0 is doing.
+            multicore::spawn(cores.core4, crate::CORE4_STACK.take(), || {
+                let mut outbox = Outbox::take().expect("core4 outbox");
+                for seq in 1..=STREAM_TICKS {
+                    let msg = Message {
+                        peer: Core::Core0,
+                        msgid: TICK_MSGID,
+                        pdata: seq,
+                        data: 0,
+                    };
+                    while outbox.try_send(msg).is_err() {
+                        core::hint::spin_loop();
+                    }
+                    // ~20 ms at the boot point, stretching ~3x once the APP
+                    // domain drops to Lp — only the ordering matters.
+                    cortex_m::asm::delay(20 * 97_500);
+                }
+                // Returning parks Core4; stragglers are filtered later.
+            })
+            .expect("spawn core4");
+
+            let mut recv_tick = || loop {
+                let msg = crate::block_on(inbox.recv());
+                if msg.msgid == TICK_MSGID {
+                    break msg.pdata;
+                }
+            };
+
+            let mut seqs = [0u16; 4];
+            seqs[0] = recv_tick();
+            seqs[1] = recv_tick();
+            // The FREQLOCK handshake runs while Core4 keeps streaming: PM
+            // replies and user datagrams interleave on Core0's one RX FIFO,
+            // and the dispatcher must route both without loss. A failed lock
+            // consumes the boot tree (no clock, so no console): the panic is
+            // silent here and surfaces as the runner's timeout.
+            let clock = crg.into_lp_clock().expect("lock Lp under live user traffic");
+            seqs[2] = recv_tick();
+            seqs[3] = recv_tick();
+            (clock, seqs)
+        };
+
+        // UART1 for defmt console output — configured after any
+        // operating-point change so its divisor matches the settled COM rate.
+        let clock = crate::CLOCK.init(clock);
         let parts = Parts::new(pac.topreg);
         let uart1_pins = Uart1Pins {
             tx: parts.gp_spi0_cs_x,
@@ -106,11 +199,14 @@ mod tests {
             .expect("uart1 init failed");
         defmt_serial::defmt_serial(crate::SERIAL.init(uart));
 
-        let cores = unwrap!(Cores::take());
         State {
             core1: Some(cores.core1),
             core2: Some(cores.core2),
             core3: Some(cores.core3),
+            inbox,
+            outbox,
+            #[cfg(feature = "low-power")]
+            tick_seqs,
         }
     }
 
@@ -163,9 +259,9 @@ mod tests {
         })
         .expect("spawn core2");
 
-        // Core0: typed send + genuinely async receive.
-        let mut inbox = unwrap!(Inbox::take());
-        let mut outbox = unwrap!(Outbox::take());
+        // Core0: typed send + genuinely async receive, on the endpoints taken
+        // in init. Replies are filtered by msgid — under the low-power
+        // variant, stragglers from Core4's case-4 stream may still arrive.
         for i in 1..=4u16 {
             let request = Message {
                 peer: Core::Core2,
@@ -173,10 +269,15 @@ mod tests {
                 pdata: i,
                 data: u32::from(i) * 1000,
             };
-            while outbox.try_send(request).is_err() {
+            while state.outbox.try_send(request).is_err() {
                 core::hint::spin_loop();
             }
-            let reply = crate::block_on(inbox.recv());
+            let reply = loop {
+                let msg = crate::block_on(state.inbox.recv());
+                if msg.msgid == 7 {
+                    break msg;
+                }
+            };
             assert_eq!(reply.peer.index(), Core::Core2.index());
             assert_eq!(reply.msgid, 7);
             assert_eq!(reply.pdata, i);
@@ -216,5 +317,20 @@ mod tests {
             core::hint::spin_loop();
         }
         assert_eq!(*SHARED.lock(), 2 * N);
+    }
+
+    /// Case 4 (`--features low-power` builds): assert the evidence `init`
+    /// recorded while Core4 streamed ticks across a live `into_lp_clock`
+    /// FREQLOCK handshake. That this assertion runs at all proves the
+    /// handshake completed (PM replies routed to the PM sink, every CLK_CHG
+    /// step acked — a failure has no `Clock`, so no console, and times out
+    /// the runner), and the first four tick sequence numbers must be exactly
+    /// 1..=4 — at that tick rate the 8-deep inbox ring never fills, so the
+    /// dispatcher preserving every user datagram is deterministic, not
+    /// probabilistic.
+    #[cfg(feature = "low-power")]
+    #[test]
+    fn dispatcher_survives_freqlock(state: &mut State) {
+        assert_eq!(state.tick_seqs, [1, 2, 3, 4]);
     }
 }
