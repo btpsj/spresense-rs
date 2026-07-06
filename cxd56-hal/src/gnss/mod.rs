@@ -79,7 +79,7 @@ use thiserror::Error;
 
 use crate::clocks::{Clock, Hp};
 use crate::farapi::{self, FarapiError};
-use crate::multicore::Mailbox;
+use crate::multicore::{Mailbox, mailbox};
 use crate::pac;
 
 /// Error from the GNSS driver.
@@ -410,7 +410,8 @@ impl Latch {
             if Mailbox::try_send(words).is_ok() {
                 return;
             }
-            if let Some(w) = Mailbox::try_recv() {
+            mailbox::drain_rx();
+            if let Some(w) = mailbox::msg_try_recv() {
                 self.absorb(proto::classify(w));
             }
             core::hint::spin_loop();
@@ -433,10 +434,10 @@ impl Latch {
         }
     }
 
-    /// Drain the mailbox, then wait until `done(self)` or the deadline.
+    /// Drain the notification sink, then wait until `done(self)` or the deadline.
     fn wait_until(&mut self, deadline: u64, mut done: impl FnMut(&mut Self) -> bool) -> bool {
         loop {
-            while let Some(w) = Mailbox::try_recv() {
+            while let Some(w) = mailbox::msg_try_recv() {
                 self.absorb(proto::classify(w));
             }
             self.service_requests();
@@ -455,9 +456,12 @@ impl Latch {
 /// firmware return value (`arg[0]`); panics on transport timeout (see the
 /// module-level "Panics" note).
 fn rpc(latch: &mut Latch, dest_cpu: u32, modid: i32, api_id: i32, arg: &mut [u32; 4], budget: u32) -> i32 {
-    let res = farapi::call_to(dest_cpu, modid, api_id, arg, budget, |w| {
+    let res = farapi::call_to(dest_cpu, modid, api_id, arg, budget);
+    // Notifications that landed mid-RPC were parked in the dispatcher's MSG
+    // sink; absorb them before acting on the latch.
+    while let Some(w) = mailbox::msg_try_recv() {
         latch.absorb(proto::classify(w));
-    });
+    }
     latch.service_requests();
     match res {
         Ok(()) => arg[0] as i32,

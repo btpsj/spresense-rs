@@ -13,9 +13,10 @@
 //! - [`hw_mutex`] — [`HwMutex`], the data-guarding cross-core mutex composed
 //!   from an [`Sph`] slot + the required memory barriers.
 //! - [`mailbox`] — inter-core messages over the CPU FIFO: the raw two-word
-//!   [`Mailbox`] plus the typed, interrupt-driven async [`Inbox`]/[`Outbox`]
+//!   [`Mailbox`], the typed, interrupt-driven async [`Inbox`]/[`Outbox`]
 //!   channel ([`Message`], `FIFO_FROM`/`FIFO_TO` wakers via
-//!   [`on_rx_interrupt`]/[`on_tx_interrupt`]).
+//!   [`on_rx_interrupt`]/[`on_tx_interrupt`]), and the per-protocol RX
+//!   dispatcher that lets them coexist with the PM/FARAPI system protocols.
 
 pub mod cpu;
 pub mod hw_mutex;

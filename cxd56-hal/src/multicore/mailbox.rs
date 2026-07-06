@@ -26,11 +26,10 @@
 //!
 //! # Two layers
 //!
-//! - [`Mailbox`] — the raw, polling `[u32; 2]` exchange. It is what the
-//!   PM/FARAPI drivers speak (their protocols are inherently synchronous
-//!   request/response), and it stays available for protocol experiments.
-//!   It performs **no** proto demultiplexing: a raw receive takes whatever is
-//!   at the head of this core's RX FIFO.
+//! - [`Mailbox`] — the raw, polling `[u32; 2]` exchange. The PM/FARAPI
+//!   drivers send their requests through it, and it stays available for
+//!   protocol experiments. It performs **no** proto demultiplexing: a raw
+//!   receive takes whatever is at the head of this core's RX FIFO.
 //! - [`Inbox`] / [`Outbox`] — per-core typed endpoints for proto-14
 //!   [`Message`]s with `async` receive/send, built on the FIFO interrupts and
 //!   hand-rolled wakers (no executor dependency; any waker works, including a
@@ -59,19 +58,25 @@
 //! Forward them on **every core** that uses the respective endpoint (the
 //! vector table is shared; each core takes only the lines it unmasked).
 //!
-//! # Coexistence with the PM / FARAPI protocols on `Core0`
+//! # The RX dispatcher — coexistence with the PM / FARAPI protocols
 //!
-//! `Core0`'s RX FIFO also carries the SYSIOP protocol replies. The polling
-//! handshakes in `clocks::pm` and `farapi` therefore run under
-//! `with_rx_claimed`: they mask `FIFO_FROM` for their (bounded) duration so
-//! the RX interrupt cannot steal a protocol reply, and any proto-14 message
-//! they pull meanwhile is routed into the local [`Inbox`] via `stash_user`
-//! instead of being dropped — so an async `recv` in flight during a
-//! `request_perf` merely resumes a little later, losing nothing. In the other
-//! direction, [`on_rx_interrupt`] no longer drops non-proto-14 traffic: every
-//! drain runs through the per-protocol dispatcher (`drain_rx_locked`), which
-//! buffers PM / FLG messages into their own per-core sinks instead of popping
-//! them into the void.
+//! `Core0`'s RX FIFO also carries the SYSIOP protocol replies. Every drain of
+//! the hardware FIFO — the `FIFO_FROM` handler *and* the blocking handshake
+//! loops in `clocks::pm` / `farapi` — therefore runs through one per-protocol
+//! dispatcher (`drain_rx_locked`), which routes each message by its proto
+//! nibble: PM and FLG into small per-core sinks their polling loops pop, and
+//! proto 14 into the [`Inbox`] ring. No consumer can steal another protocol's
+//! traffic, no matter which context happens to pop the hardware — an async
+//! `recv` in flight across a `request_perf` merely resumes a little later,
+//! losing nothing, and no interrupt masking is involved at all. Unclaimed
+//! protocols are dropped, as they always were; a future GNSS driver adds its
+//! protos (0/13) as further arms of the same match.
+//!
+//! The one policy split concerns a **full** inbox ring: the interrupt handler
+//! stops draining and leaves the backlog in hardware (back-pressure, below),
+//! while a protocol loop — which must pop *past* queued user datagrams to
+//! reach its own replies — drops them instead, exactly the datagram-overflow
+//! semantics the pre-dispatcher stash had.
 //!
 //! # Flow control
 //!
@@ -168,9 +173,10 @@ impl Mailbox {
     /// reason as [`try_send`](Self::try_send).
     ///
     /// Note this takes whatever is at the head of this core's RX FIFO,
-    /// regardless of protocol — on `Core0`, do not poll this while an async
-    /// [`Inbox`] is armed unless `FIFO_FROM` is masked (see the module's
-    /// coexistence notes and `with_rx_claimed` in the module source).
+    /// regardless of protocol — it bypasses the per-protocol dispatcher. Do
+    /// not poll this on a core where the dispatcher is in use (an armed
+    /// [`Inbox`], or a `clocks::pm` / `farapi` call in flight): it would
+    /// steal messages the dispatcher's consumers are waiting for.
     #[inline]
     pub fn try_recv() -> Option<[u32; 2]> {
         critical_section::with(|_| {
@@ -212,6 +218,10 @@ impl Mailbox {
 // The ICC protocol registry (proto-nibble values from `cxd56_icc.h`). The
 // dispatcher (`drain_rx_locked`) routes every inbound message by these ids.
 
+/// `CXD56_PROTO_MSG` — unsolicited firmware→app notifications; inbound GNSS
+/// events ride this proto (`crate::gnss`). Its outbound counterpart
+/// (`CXD56_PROTO_GNSS` = 13) never arrives inbound.
+pub(crate) const PROTO_MSG: u32 = 0;
 /// `CXD56_PROTO_FLG` — FARAPI completion event flags (`crate::farapi`).
 pub(crate) const PROTO_FLG: u32 = 3;
 /// `CXD56_PROTO_PM` — the SYSIOP power-manager protocol (`crate::clocks::pm`).
@@ -277,16 +287,16 @@ const EMPTY_MSG: Message = Message {
     data: 0,
 };
 
-/// Fixed-capacity FIFO of decoded [`Message`]s, one per core, filled by
-/// [`on_rx_interrupt`] / [`stash_user`] and drained by [`Inbox`].
+/// Fixed-capacity FIFO of decoded [`Message`]s, one per core, filled by the
+/// dispatcher (`drain_rx_locked`) and drained by [`Inbox`].
 struct RxRing {
     buf: [Message; RX_RING_DEPTH],
     /// Index of the oldest element.
     head: u8,
     len: u8,
     /// `FIFO_FROM` was masked because this ring filled up; the next pop must
-    /// unmask it (and only then — an unconditional unmask would fight the
-    /// PM/FARAPI [`with_rx_claimed`] window).
+    /// unmask it (and only then — the pop path must not otherwise touch the
+    /// line's arming state).
     masked_by_full: bool,
 }
 
@@ -566,6 +576,16 @@ impl<const DEPTH: usize> RawRing<DEPTH> {
         self.buf[tail] = words;
         self.len += 1;
     }
+
+    fn pop(&mut self) -> Option<[u32; 2]> {
+        if self.len == 0 {
+            return None;
+        }
+        let words = self.buf[self.head as usize];
+        self.head = (self.head + 1) % DEPTH as u8;
+        self.len -= 1;
+        Some(words)
+    }
 }
 
 /// Sink depth for each buffered system protocol. The handshakes are strict
@@ -573,33 +593,54 @@ impl<const DEPTH: usize> RawRing<DEPTH> {
 /// rest of the depth is margin for unsolicited strays.
 const SINK_DEPTH: usize = 4;
 
+/// Sink depth for the MSG (notification) protocol. Unlike PM/FLG this is not
+/// request/response: the GPS firmware sends unsolicited bursts (boot events,
+/// backup/CEP file requests, data-ready) that buffer here until the GNSS
+/// driver's next pop, so it gets more headroom.
+const MSG_SINK_DEPTH: usize = 8;
+
 /// Per-core buffered sinks for the polled system protocols, filled by the
 /// dispatcher (`drain_rx_locked`) from whichever context drains the hardware
 /// FIFO and popped by the protocol loops (`crate::clocks::pm`,
-/// `crate::farapi`). Indexed by `Core::index()`; only a core's own contexts
-/// touch its entry (same invariant as `RX`), so a single-core
+/// `crate::farapi`, `crate::gnss`). Indexed by `Core::index()`; only a core's
+/// own contexts touch its entry (same invariant as `RX`), so a single-core
 /// `critical_section` impl is sufficient protection.
 static PM_SINK: [Mutex<RefCell<RawRing<SINK_DEPTH>>>; CORE_COUNT] =
     [const { Mutex::new(RefCell::new(RawRing::new())) }; CORE_COUNT];
 static FLG_SINK: [Mutex<RefCell<RawRing<SINK_DEPTH>>>; CORE_COUNT] =
     [const { Mutex::new(RefCell::new(RawRing::new())) }; CORE_COUNT];
+static MSG_SINK: [Mutex<RefCell<RawRing<MSG_SINK_DEPTH>>>; CORE_COUNT] =
+    [const { Mutex::new(RefCell::new(RawRing::new())) }; CORE_COUNT];
+
+/// Who is draining the RX FIFO — decides the policy when a proto-14 message
+/// meets a full inbox ring (see `drain_rx_locked`).
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum DrainCtx {
+    /// The `FIFO_FROM` handler: stop draining, mask the line, leave the
+    /// backlog in hardware — end-to-end back-pressure (module docs).
+    Isr,
+    /// A blocking protocol loop (PM / FARAPI): it must pop *past* queued user
+    /// datagrams to reach its own replies, so with the ring full they are
+    /// dropped instead — datagram-overflow semantics.
+    Sync,
+}
 
 /// Drain this core's hardware RX FIFO, routing every message to its
-/// protocol's sink: PM → `PM_SINK`, FLG → `FLG_SINK`, proto 14 → the
-/// [`Inbox`] ring. Unclaimed protocols are dropped, exactly as before the
-/// dispatcher existed (a future GNSS driver adds its protos 0/13 as further
-/// arms of the match). Returns whether a user message was buffered; the
-/// caller wakes the receiver *outside* the critical section.
+/// protocol's sink: PM → `PM_SINK`, FLG → `FLG_SINK`, MSG → `MSG_SINK`
+/// (GNSS notifications), proto 14 → the [`Inbox`] ring. Unclaimed protocols
+/// are dropped, exactly as before the dispatcher existed. Returns whether a
+/// user message was buffered; the caller wakes the receiver *outside* the
+/// critical section.
 ///
-/// When the inbox ring is full the drain stops wholesale and masks
-/// `FIFO_FROM` — even a system-protocol message behind the full-mark stays
-/// in hardware (the level IRQ re-fires and finishes the job once a pop
-/// unmasks the line).
-fn drain_rx_locked(cs: CriticalSection<'_>, idx: usize) -> bool {
+/// In [`DrainCtx::Isr`], a full inbox ring stops the drain wholesale and
+/// masks `FIFO_FROM` — even a system-protocol message behind the full-mark
+/// stays in hardware (a protocol loop's own drain retrieves it, or the level
+/// IRQ re-fires and finishes the job once a pop unmasks the line).
+fn drain_rx_locked(cs: CriticalSection<'_>, idx: usize, ctx: DrainCtx) -> bool {
     let mut ring = RX[idx].ring.borrow(cs).borrow_mut();
     let mut pushed_user = false;
     loop {
-        if ring.is_full() {
+        if ctx == DrainCtx::Isr && ring.is_full() {
             NVIC::mask(pac::Interrupt::FIFO_FROM);
             ring.masked_by_full = true;
             break;
@@ -608,10 +649,17 @@ fn drain_rx_locked(cs: CriticalSection<'_>, idx: usize) -> bool {
             break;
         };
         match (words[0] >> 24) & 0xf {
+            PROTO_MSG => MSG_SINK[idx].borrow(cs).borrow_mut().push(words),
             PROTO_PM => PM_SINK[idx].borrow(cs).borrow_mut().push(words),
             PROTO_FLG => FLG_SINK[idx].borrow(cs).borrow_mut().push(words),
             _ => {
-                if let Some(msg) = Message::from_words(words) {
+                // Proto 14 buffers unless the ring is full — only reachable
+                // in `DrainCtx::Sync` (the Isr policy stops before popping),
+                // where it is a datagram-overflow drop. Undecodable or
+                // unclaimed protocols are dropped.
+                if let Some(msg) = Message::from_words(words)
+                    && !ring.is_full()
+                {
                     ring.push(msg);
                     pushed_user = true;
                 }
@@ -625,14 +673,14 @@ fn drain_rx_locked(cs: CriticalSection<'_>, idx: usize) -> bool {
 /// every core that armed an [`Inbox`].
 ///
 /// Drains this core's hardware RX FIFO through the per-protocol dispatcher —
-/// proto-14 messages land in the inbox ring, PM / FLG messages are buffered
-/// for their polling loops, unclaimed protocols are dropped — then wakes the
+/// proto-14 messages land in the inbox ring, PM / FLG / MSG messages are
+/// buffered for their polling loops, unclaimed protocols are dropped — then wakes the
 /// receiver. When the ring fills, the line is masked and the backlog stays in
 /// hardware for end-to-end back-pressure; the next
 /// [`Inbox::try_recv`]/[`recv`](Inbox::recv) pop unmasks it.
 pub fn on_rx_interrupt() {
     let idx = cpu::current().index() as usize;
-    let pushed = critical_section::with(|cs| drain_rx_locked(cs, idx));
+    let pushed = critical_section::with(|cs| drain_rx_locked(cs, idx, DrainCtx::Isr));
     if pushed {
         RX[idx].waker.wake();
     }
@@ -648,43 +696,47 @@ pub fn on_tx_interrupt() {
     TX_WAKERS[cpu::current().index() as usize].wake();
 }
 
-/// Run a blocking, polled FIFO protocol exchange (PM / FARAPI) with this
-/// core's RX interrupt held off, so [`on_rx_interrupt`] cannot steal the
-/// protocol replies out of the hardware FIFO mid-handshake.
-///
-/// Restores the previous NVIC mask state afterwards; any messages the
-/// handshake left in the hardware FIFO re-fire the level IRQ on restore, so
-/// nothing is lost. Pair with [`stash_user`] inside `f` for foreign proto-14
-/// traffic the loop pulls.
-pub(crate) fn with_rx_claimed<R>(f: impl FnOnce() -> R) -> R {
-    let was_enabled = NVIC::is_enabled(pac::Interrupt::FIFO_FROM);
-    NVIC::mask(pac::Interrupt::FIFO_FROM);
-    let r = f();
-    if was_enabled {
-        // SAFETY (non-priority-based masking): restoring the pre-claim state.
-        unsafe { NVIC::unmask(pac::Interrupt::FIFO_FROM) };
+/// Pop the oldest buffered message of one system protocol for this core,
+/// after draining the hardware FIFO through the dispatcher (so the pop sees
+/// everything that has physically arrived). Any user messages the drain
+/// buffered wake the local [`Inbox`] receiver — an async `recv` in flight
+/// across a blocking handshake resumes seamlessly.
+fn proto_try_recv<const N: usize>(
+    sink: &[Mutex<RefCell<RawRing<N>>>; CORE_COUNT],
+) -> Option<[u32; 2]> {
+    let idx = cpu::current().index() as usize;
+    let (words, pushed_user) = critical_section::with(|cs| {
+        let pushed_user = drain_rx_locked(cs, idx, DrainCtx::Sync);
+        (sink[idx].borrow(cs).borrow_mut().pop(), pushed_user)
+    });
+    if pushed_user {
+        RX[idx].waker.wake();
     }
-    r
+    words
 }
 
-/// Route a raw message that a polling protocol loop pulled — but does not
-/// own — into this core's [`Inbox`] ring (proto-14 only; anything else is
-/// dropped, matching the pre-async behaviour). Ring full ⇒ the message is
-/// dropped, like any datagram overflow.
-pub(crate) fn stash_user(words: [u32; 2]) {
-    let Some(msg) = Message::from_words(words) else {
-        return;
-    };
+/// `proto_try_recv` on the PM sink — `clocks::pm`'s handshake receive.
+pub(crate) fn pm_try_recv() -> Option<[u32; 2]> {
+    proto_try_recv(&PM_SINK)
+}
+
+/// `proto_try_recv` on the FLG sink — `farapi`'s completion receive.
+pub(crate) fn flg_try_recv() -> Option<[u32; 2]> {
+    proto_try_recv(&FLG_SINK)
+}
+
+/// `proto_try_recv` on the MSG sink — the GNSS driver's notification receive.
+pub(crate) fn msg_try_recv() -> Option<[u32; 2]> {
+    proto_try_recv(&MSG_SINK)
+}
+
+/// Drain this core's hardware RX FIFO through the dispatcher without popping
+/// any sink — for bounded push loops that must keep consuming inbound traffic
+/// while their own TX FIFO is full (`farapi`, the GNSS signal path), so a
+/// peer that is itself pushing to us cannot deadlock the exchange.
+pub(crate) fn drain_rx() {
     let idx = cpu::current().index() as usize;
-    let pushed = critical_section::with(|cs| {
-        let mut ring = RX[idx].ring.borrow(cs).borrow_mut();
-        if ring.is_full() {
-            false
-        } else {
-            ring.push(msg);
-            true
-        }
-    });
+    let pushed = critical_section::with(|cs| drain_rx_locked(cs, idx, DrainCtx::Sync));
     if pushed {
         RX[idx].waker.wake();
     }
