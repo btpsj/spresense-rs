@@ -68,10 +68,10 @@
 //! they pull meanwhile is routed into the local [`Inbox`] via `stash_user`
 //! instead of being dropped — so an async `recv` in flight during a
 //! `request_perf` merely resumes a little later, losing nothing. In the other
-//! direction, [`on_rx_interrupt`] drops non-proto-14 traffic (an unsolicited
-//! protocol message outside a handshake was dropped before this module
-//! existed, too; a full per-proto dispatcher can grow out of that match arm
-//! without changing this API).
+//! direction, [`on_rx_interrupt`] no longer drops non-proto-14 traffic: every
+//! drain runs through the per-protocol dispatcher (`drain_rx_locked`), which
+//! buffers PM / FLG messages into their own per-core sinks instead of popping
+//! them into the void.
 //!
 //! # Flow control
 //!
@@ -88,7 +88,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Poll, Waker};
 
 use cortex_m::peripheral::NVIC;
-use critical_section::Mutex;
+use critical_section::{CriticalSection, Mutex};
 
 use super::cpu::{self, Core};
 use crate::pac;
@@ -209,6 +209,13 @@ impl Mailbox {
 // Typed user channel (ICC proto 14)
 // ---------------------------------------------------------------------------
 
+// The ICC protocol registry (proto-nibble values from `cxd56_icc.h`). The
+// dispatcher (`drain_rx_locked`) routes every inbound message by these ids.
+
+/// `CXD56_PROTO_FLG` — FARAPI completion event flags (`crate::farapi`).
+pub(crate) const PROTO_FLG: u32 = 3;
+/// `CXD56_PROTO_PM` — the SYSIOP power-manager protocol (`crate::clocks::pm`).
+pub(crate) const PROTO_PM: u32 = 10;
 /// The ICC protocol nibble this module's [`Message`] channel rides on — the
 /// only id the vendor protocol table (`cxd56_icc.h`) leaves undefined.
 const PROTO_USER: u32 = 14;
@@ -527,35 +534,105 @@ impl Outbox {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ICC RX dispatcher
+// ---------------------------------------------------------------------------
+
+/// Fixed-capacity ring of raw two-word messages — the buffered sink of one
+/// polled system protocol (PM, FLG). Overflow drops the newest message: for
+/// the request/response protocols these sinks buffer, a drop surfaces as the
+/// polling loop's own bounded-wait failure rather than silent corruption.
+struct RawRing<const DEPTH: usize> {
+    buf: [[u32; 2]; DEPTH],
+    /// Index of the oldest element.
+    head: u8,
+    len: u8,
+}
+
+impl<const DEPTH: usize> RawRing<DEPTH> {
+    const fn new() -> Self {
+        RawRing {
+            buf: [[0; 2]; DEPTH],
+            head: 0,
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, words: [u32; 2]) {
+        if self.len as usize == DEPTH {
+            return; // overflow: drop (see the type docs)
+        }
+        let tail = (self.head as usize + self.len as usize) % DEPTH;
+        self.buf[tail] = words;
+        self.len += 1;
+    }
+}
+
+/// Sink depth for each buffered system protocol. The handshakes are strict
+/// request/response — at most one message is legitimately in flight — so the
+/// rest of the depth is margin for unsolicited strays.
+const SINK_DEPTH: usize = 4;
+
+/// Per-core buffered sinks for the polled system protocols, filled by the
+/// dispatcher (`drain_rx_locked`) from whichever context drains the hardware
+/// FIFO and popped by the protocol loops (`crate::clocks::pm`,
+/// `crate::farapi`). Indexed by `Core::index()`; only a core's own contexts
+/// touch its entry (same invariant as `RX`), so a single-core
+/// `critical_section` impl is sufficient protection.
+static PM_SINK: [Mutex<RefCell<RawRing<SINK_DEPTH>>>; CORE_COUNT] =
+    [const { Mutex::new(RefCell::new(RawRing::new())) }; CORE_COUNT];
+static FLG_SINK: [Mutex<RefCell<RawRing<SINK_DEPTH>>>; CORE_COUNT] =
+    [const { Mutex::new(RefCell::new(RawRing::new())) }; CORE_COUNT];
+
+/// Drain this core's hardware RX FIFO, routing every message to its
+/// protocol's sink: PM → `PM_SINK`, FLG → `FLG_SINK`, proto 14 → the
+/// [`Inbox`] ring. Unclaimed protocols are dropped, exactly as before the
+/// dispatcher existed (a future GNSS driver adds its protos 0/13 as further
+/// arms of the match). Returns whether a user message was buffered; the
+/// caller wakes the receiver *outside* the critical section.
+///
+/// When the inbox ring is full the drain stops wholesale and masks
+/// `FIFO_FROM` — even a system-protocol message behind the full-mark stays
+/// in hardware (the level IRQ re-fires and finishes the job once a pop
+/// unmasks the line).
+fn drain_rx_locked(cs: CriticalSection<'_>, idx: usize) -> bool {
+    let mut ring = RX[idx].ring.borrow(cs).borrow_mut();
+    let mut pushed_user = false;
+    loop {
+        if ring.is_full() {
+            NVIC::mask(pac::Interrupt::FIFO_FROM);
+            ring.masked_by_full = true;
+            break;
+        }
+        let Some(words) = Mailbox::try_recv() else {
+            break;
+        };
+        match (words[0] >> 24) & 0xf {
+            PROTO_PM => PM_SINK[idx].borrow(cs).borrow_mut().push(words),
+            PROTO_FLG => FLG_SINK[idx].borrow(cs).borrow_mut().push(words),
+            _ => {
+                if let Some(msg) = Message::from_words(words) {
+                    ring.push(msg);
+                    pushed_user = true;
+                }
+            }
+        }
+    }
+    pushed_user
+}
+
 /// RX interrupt entry point: forward `#[interrupt] fn FIFO_FROM()` here on
 /// every core that armed an [`Inbox`].
 ///
-/// Drains this core's hardware RX FIFO into its ring — proto-14 messages are
-/// buffered, anything else is dropped (see the module's coexistence notes) —
-/// then wakes the receiver. When the ring fills, the line is masked and the
-/// backlog stays in hardware for end-to-end back-pressure; the next
+/// Drains this core's hardware RX FIFO through the per-protocol dispatcher —
+/// proto-14 messages land in the inbox ring, PM / FLG messages are buffered
+/// for their polling loops, unclaimed protocols are dropped — then wakes the
+/// receiver. When the ring fills, the line is masked and the backlog stays in
+/// hardware for end-to-end back-pressure; the next
 /// [`Inbox::try_recv`]/[`recv`](Inbox::recv) pop unmasks it.
 pub fn on_rx_interrupt() {
     let idx = cpu::current().index() as usize;
-    let pushed = critical_section::with(|cs| {
-        let mut ring = RX[idx].ring.borrow(cs).borrow_mut();
-        let mut pushed = false;
-        loop {
-            if ring.is_full() {
-                NVIC::mask(pac::Interrupt::FIFO_FROM);
-                ring.masked_by_full = true;
-                break;
-            }
-            let Some(words) = Mailbox::try_recv() else {
-                break;
-            };
-            if let Some(msg) = Message::from_words(words) {
-                ring.push(msg);
-                pushed = true;
-            }
-        }
-        pushed
-    });
+    let pushed = critical_section::with(|cs| drain_rx_locked(cs, idx));
     if pushed {
         RX[idx].waker.wake();
     }
