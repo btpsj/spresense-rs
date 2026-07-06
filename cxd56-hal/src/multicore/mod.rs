@@ -9,6 +9,8 @@
 //! - [`sph`] — hardware-semaphore cross-core lock primitive ([`Sph`]). The
 //!   Cortex-M4 `LDREX`/`STREX` monitors do not work across cores, so the SPH
 //!   block is the only sound cross-core mutual-exclusion primitive.
+//! - [`hw_mutex`] — [`HwMutex`], the data-guarding cross-core mutex composed
+//!   from an [`Sph`] slot + the required memory barriers.
 //! - [`mailbox`] — two-word inter-core messages over the CPU FIFO ([`Mailbox`]).
 //!
 //! # Scope: polling/spinning only
@@ -22,11 +24,13 @@
 //! in the right vector slot whenever someone implements them.
 
 pub mod cpu;
+pub mod hw_mutex;
 pub mod mailbox;
 pub mod spawn;
 pub mod sph;
 
 pub use cpu::{Core, current};
+pub use hw_mutex::{HwMutex, HwMutexGuard};
 pub use mailbox::{Full, Mailbox};
 pub use spawn::{SpawnError, ack_boot, spawn};
 pub use sph::{COUNT, RESERVED_CS_ID, Sph};

@@ -11,17 +11,35 @@
 //! through [`pac::Sph::PTR`] rather than owning a singleton handle.
 //!
 //! [`Sph<N>`] is a zero-size, const-generic token; the index lives in the type
-//! and is validated at compile time. `Sph` is only the raw lock primitive —
-//! building a data-guarding mutex on top of it is left to downstream consumers.
-//! The lock/unlock operations imply **no memory barrier**: a consumer that
-//! guards Normal-memory data must add a `cortex_m::asm::dmb()` after locking and
-//! before unlocking (Normal-vs-Device accesses may otherwise reorder on
-//! multi-core ARMv7-M — the `critical_section_impl` module is the reference
-//! pattern).
+//! and is validated at compile time. `Sph` is the raw lock primitive; two
+//! consumers with the barrier discipline built in sit on top of it:
+//! [`Sph::with`] (scoped section) and [`HwMutex`](super::hw_mutex::HwMutex)
+//! (data-guarding mutex). The bare [`try_lock`](Sph::try_lock)/
+//! [`lock`](Sph::lock)/[`unlock`](Sph::unlock) operations imply **no memory
+//! barrier**: a consumer that guards Normal-memory data through them must add a
+//! `cortex_m::asm::dmb()` after locking and before unlocking (Normal-vs-Device
+//! accesses may otherwise reorder on multi-core ARMv7-M — the
+//! `critical_section_impl` module is the reference pattern).
+//!
+//! # Same-core rules
+//!
+//! The hardware tracks ownership per **core** (the raw ADSP id), not per
+//! execution context, and it silently ignores a redundant `LOCK` from the
+//! owning core. Two rules follow:
+//!
+//! - The lock is **not reentrant**: [`try_lock`](Sph::try_lock) reports `false`
+//!   and [`lock`](Sph::lock)/[`with`](Sph::with) panic if this core already
+//!   holds the slot (a "second acquisition" would let two owners alias).
+//! - A same-core **interrupt handler must not contend** for a slot its thread
+//!   context holds across the interrupt: the owner field cannot distinguish the
+//!   two contexts, so the thread could observe a false win while the handler
+//!   holds the lock. For thread↔ISR sharing use the `critical-section-impl`
+//!   feature (which masks interrupts); SPH slots are for *cross-core* exclusion.
 
 use super::cpu;
 use crate::pac;
 use core::marker::PhantomData;
+use core::sync::atomic::{Ordering, compiler_fence};
 
 /// Number of hardware semaphores.
 pub const COUNT: usize = 16;
@@ -120,31 +138,76 @@ impl<const N: usize> Sph<N> {
     ///
     /// Issues a `LOCK` request and checks whether this core won arbitration by
     /// comparing the recorded owner against this core's raw ADSP id. Returns
-    /// `true` iff this core now holds the lock.
+    /// `true` iff this core acquired the lock **with this call**.
     ///
-    /// The hardware ignores a redundant `LOCK` from a core that already holds the
-    /// slot, so a same-core re-lock also returns `true`. Code building a mutex on
-    /// top of `Sph` must account for this: the lock is **not** reentrant, so a
-    /// second guard would alias the first.
+    /// The hardware silently ignores a redundant `LOCK` from a core that already
+    /// holds the slot (the owner field would still name this core), so `try_lock`
+    /// first reads the owner and returns `false` when this core already holds the
+    /// semaphore: the lock is not reentrant, and reporting a re-lock as a win
+    /// would let two acquisitions alias. Only this core can make itself the
+    /// owner, so the pre-check cannot race with other cores.
     #[inline]
     pub fn try_lock(self) -> bool {
         let () = Self::VALID;
+        if raw_owner(N) == Some(cpu::raw_pid()) {
+            return false;
+        }
         raw_try_lock(N)
     }
 
     /// Spin until the semaphore is acquired.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this core already holds the semaphore: a same-core re-lock can
+    /// never succeed (see [`try_lock`](Self::try_lock)), so spinning on it would
+    /// hang forever — the panic makes the reentry bug loud instead. See the
+    /// module-level same-core rules for the interrupt-handler corollary.
     #[inline]
     pub fn lock(self) {
-        while !self.try_lock() {
+        let () = Self::VALID;
+        if raw_owner(N) == Some(cpu::raw_pid()) {
+            panic!("reentrant SPH lock: this core already holds the semaphore");
+        }
+        while !raw_try_lock(N) {
             core::hint::spin_loop();
         }
     }
 
     /// Release the semaphore. Only meaningful if this core currently holds it.
+    ///
+    /// No memory barrier is implied — see the module docs; [`with`](Self::with)
+    /// is the barrier-correct scoped alternative.
     #[inline]
     pub fn unlock(self) {
         let () = Self::VALID;
         raw_unlock(N);
+    }
+
+    /// Run `f` while holding the semaphore, with the memory barriers a
+    /// data-guarding consumer needs issued internally.
+    ///
+    /// Acquires the lock (spinning), issues the `DMB` that orders the lock
+    /// acquisition before `f`'s protected accesses, runs `f`, then (on scope
+    /// exit, including a panic with unwinding) issues the `DMB` that publishes
+    /// `f`'s stores before the unlock is observable — the same barrier
+    /// discipline as `critical_section_impl` (per ARM DAI0321A the cache-free
+    /// reordering exemption does not apply to multi-core parts).
+    ///
+    /// Unlike `critical_section::with`, interrupts stay **enabled**: this is a
+    /// purely cross-core lock, and the module-level same-core rules apply.
+    ///
+    /// # Panics
+    ///
+    /// Panics on same-core reentry (see [`lock`](Self::lock)).
+    #[inline]
+    pub fn with<R>(self, f: impl FnOnce() -> R) -> R {
+        self.lock();
+        // Order the lock acquisition (Device access) before the protected
+        // accesses (Normal memory); mirrors critical_section_impl::acquire.
+        cortex_m::asm::dmb();
+        let _unlock = UnlockOnDrop::<N>(());
+        f()
     }
 
     /// The raw ADSP id of the core currently holding the lock, or `None` if the
@@ -153,5 +216,23 @@ impl<const N: usize> Sph<N> {
     pub fn owner(self) -> Option<u8> {
         let () = Self::VALID;
         raw_owner(N)
+    }
+}
+
+/// Releases semaphore `N` on drop, publishing the protected stores first.
+///
+/// Backs [`Sph::with`] so the unlock (and its barrier) also runs when `f`
+/// panics under an unwinding panic handler.
+struct UnlockOnDrop<const N: usize>(());
+
+impl<const N: usize> Drop for UnlockOnDrop<N> {
+    fn drop(&mut self) {
+        // Make the protected stores (Normal memory) globally visible before the
+        // unlock (Device memory) is observed by another core. `compiler_fence`
+        // stops compiler reordering; the `dmb` is the hardware barrier (mirrors
+        // critical_section_impl::release).
+        compiler_fence(Ordering::SeqCst);
+        cortex_m::asm::dmb();
+        raw_unlock(N);
     }
 }
