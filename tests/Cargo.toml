@@ -59,6 +59,11 @@ name = "gpio_embassy"
 harness = false
 required-features = ["embassy-pac"]
 
+[[test]]
+name = "multicore"
+harness = false
+required-features = ["hal"]
+
 # cxd56-hal allows EXACTLY ONE async-time backend (compile_error! otherwise), so
 # per invocation enable exactly one of time-rtc/time-timer/backing-rtc/backing-timer.
 # Defaults match what the old per-crate defaults resolved for the bins and the

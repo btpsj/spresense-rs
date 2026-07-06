@@ -144,6 +144,7 @@ jobs:
           cargo test --release --no-run --test time
           cargo test --release --no-run --test spi
           cargo test --release --no-run --test i2s
+          cargo test --release --no-run --test multicore
           cargo test --release --no-run --test gpio --no-default-features --features backing-rtc
           cargo test --release --no-run --test pwm  --no-default-features --features backing-rtc
           cargo test --release --no-run --test gpio_embassy --no-default-features --features embassy-pac
@@ -154,7 +155,7 @@ jobs:
         working-directory: tests
         run: |
           set -e
-          cargo clippy --release --bins --test time --test spi --test i2s -- -D warnings
+          cargo clippy --release --bins --test time --test spi --test i2s --test multicore -- -D warnings
           cargo clippy --release --no-default-features --features backing-rtc --test gpio --test pwm -- -D warnings
           cargo clippy --release --no-default-features --features embassy-pac --test gpio_embassy -- -D warnings
 
