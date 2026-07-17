@@ -93,6 +93,7 @@ struct Cli {
     skip_build: bool,
 
     /// After flashing, open a serial monitor on the board's console output
+    /// (decodes defmt frames when the ELF embeds defmt data)
     #[arg(long)]
     monitor: bool,
 
@@ -153,7 +154,7 @@ fn main() -> Result<()> {
     }
 
     if cli.monitor {
-        monitor::run(&port)?;
+        monitor::run(&port, &elf_src)?;
     }
 
     Ok(())
