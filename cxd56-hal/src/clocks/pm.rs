@@ -179,7 +179,7 @@ fn send_pm(proto_data: u32, data: u32) {
 ///
 /// Returns [`PmError::ClockChangeFailed`] if `CLK_CHG_END` carries a non-zero
 /// status (a firmware-side callback failure).
-pub fn request_perf(perf: Perf) -> Result<(), PmError> {
+pub(crate) fn request_perf(perf: Perf) -> Result<(), PmError> {
     boot_once();
 
     let flag = FLAG_INITIALIZED
