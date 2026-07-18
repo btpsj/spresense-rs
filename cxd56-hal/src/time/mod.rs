@@ -36,7 +36,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use crate::clocks::Clock;
+use crate::clocks::{Clock, PerfState};
 
 #[cfg(feature = "time-driver-rtc")]
 mod rtc;
@@ -52,7 +52,7 @@ pub use timer::{on_alarm_interrupt, on_overflow_interrupt};
 /// backing — sample the (perf-dependent) base clock the counter runs at. Call once
 /// after clock/perf setup, before awaiting any `embassy_time` delay or a GPIO edge
 /// wait. `clock` is used only by the SP804 backing (the RTC is perf-invariant).
-pub fn init(clock: &Clock) {
+pub fn init<P: PerfState>(clock: &Clock<P>) {
     #[cfg(feature = "time-driver-rtc")]
     {
         let _ = clock;

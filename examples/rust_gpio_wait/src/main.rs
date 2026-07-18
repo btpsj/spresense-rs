@@ -92,7 +92,7 @@ fn TIMER0() {
 #[entry]
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
-    let clock = dp.crg.constrain(Config::default()).into_clock();
+    let clock = dp.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
 
     // `into_floating_input()` enables the CTS pad's input buffer (ENZI) and sets
     // the pull, so no manual IO_* write is needed here. The RTS output pad needs

@@ -10,9 +10,10 @@
 //!
 //! All I2C clock sources are **[`Fixed`](crate::clocks::Fixed)**: I2C0/1 use `SCU`
 //! (RCOSC/XOSC/RTC-derived) and I2C2 uses `COM` (SYS-bus-derived). Neither
-//! tracks `appsmp`, the clock changed by [`Clock::request_perf`]. A programmed
-//! SCL frequency remains correct across HP↔LP transitions, so there is no need
-//! to hold a `&Clock` borrow after construction.
+//! tracks `appsmp`, the clock changed by an operating-point transition
+//! ([`Clock::into_hp`]/[`Clock::into_lp`]). A programmed SCL frequency remains
+//! correct across HP↔LP transitions, so there is no need to hold a `&Clock`
+//! borrow after construction.
 //!
 //! # Driver size
 //!
@@ -22,7 +23,7 @@
 //! applied once in [`I2c::new`] rather than per-transaction (mirroring
 //! `cxd56_i2c_setfrequency` caching behaviour in the NuttX driver).
 
-use crate::clocks::{Clock, ClockError, PeripheralId};
+use crate::clocks::{Clock, ClockError, PerfState, PeripheralId};
 use crate::gpio::GpioPin;
 use crate::pac;
 use crate::regs::topreg;
@@ -81,7 +82,7 @@ mod sealed {
     use fugit::Hertz;
 
     use super::pac;
-    use crate::clocks::{Clock, PeripheralId};
+    use crate::clocks::{Clock, PerfState, PeripheralId};
 
     /// Sealed marker trait. Implemented only for PAC I2C tokens within this
     /// crate so downstream code cannot introduce unsound implementations.
@@ -101,7 +102,7 @@ mod sealed {
         /// All I2C clocks are [`Fixed`](crate::clocks::Fixed) and therefore
         /// `Copy`, so the `clock` borrow ends here and does not need to be
         /// retained.
-        fn base_hz(clock: &Clock) -> Hertz<u32>;
+        fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32>;
     }
 }
 
@@ -144,8 +145,8 @@ impl sealed::Sealed for pac::I2c0 {
         i2c0_unpinmux();
     }
 
-    fn base_hz(clock: &Clock) -> Hertz<u32> {
-        // SCU clock is Fixed — never changes with request_perf.
+    fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32> {
+        // SCU clock is Fixed — never changes with the operating point.
         clock.scu.hz()
     }
 }
@@ -241,9 +242,15 @@ impl<T: I2cPeriph> I2c<T> {
     /// as GPIO while the bus is live. Call [`I2c::free`] to release them.
     ///
     /// `clock` is borrowed only to read `T::base_hz` — a [`Fixed`](crate::clocks::Fixed)
-    /// value that does not change with [`Clock::request_perf`]. The borrow ends
-    /// at this call; calling `request_perf` later is always allowed.
-    pub fn new(i2c: T, pins: T::Pins, clock: &Clock, config: I2cConfig) -> Result<Self, I2cError> {
+    /// value that does not change with the operating point ([`Clock::into_hp`]/
+    /// [`Clock::into_lp`]). The borrow ends at this call; the clock may be
+    /// transitioned freely afterwards.
+    pub fn new<P: PerfState>(
+        i2c: T,
+        pins: T::Pins,
+        clock: &Clock<P>,
+        config: I2cConfig,
+    ) -> Result<Self, I2cError> {
         T::ID.enable()?;
         T::pinmux();
 

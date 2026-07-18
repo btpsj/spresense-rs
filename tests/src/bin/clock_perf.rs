@@ -1,7 +1,8 @@
-//! On-hardware verification that `request_perf` reaches a correct, in-spec
-//! operating point in **both** directions via the multi-step SYSIOP FREQLOCK
-//! handshake (the fix: ack every CLK_CHG pair, complete on the trailing
-//! FREQLOCK — 3 pairs each way on CXD5602).
+//! On-hardware verification that the operating-point transitions
+//! (`into_hp_clock` at construction, then `into_lp`/`into_hp`) reach a
+//! correct, in-spec operating point in **both** directions via the multi-step
+//! SYSIOP FREQLOCK handshake (the fix: ack every CLK_CHG pair, complete on
+//! the trailing FREQLOCK — 3 pairs each way on CXD5602).
 //!
 //! Method: the SP804 timer counts at `cpu_baseclk` (a perf-dependent clock); the
 //! RTC is a free-running 32.768 kHz counter on the always-on crystal, invariant
@@ -15,10 +16,11 @@
 //! restored-HP clock and print the verdict once.
 //!
 //! Checks (all at the operating point named):
-//!   [1] hp_boot   — measured ≈ believed `cpu_baseclk` at boot (HP).
-//!   [2] lp        — measured ≈ believed after `request_perf(Lp)` (downshift took
+//!   [1] hp_boot   — measured ≈ believed `cpu_baseclk` at the HP point that
+//!                   construction (`into_hp_clock`) locks.
+//!   [2] lp        — measured ≈ believed after `into_lp()` (downshift took
 //!                   *and* the HAL's belief matches reality at LP).
-//!   [3] cache     — after `request_perf(Lp)`, the cached `clock.com` (the `Fixed`
+//!   [3] cache     — after `into_lp()`, the cached `clock.com` (the `Fixed`
 //!                   field `uart` reads) equals live `freeze().com`
 //!                   (the `resample_dyn` refresh).
 //!   [4] hp_recover— measured ≈ believed back at HP (the LP→HP round-trip).
@@ -36,7 +38,7 @@ use defmt_serial as _;
 use panic_probe as _;
 use static_cell::StaticCell;
 
-use cxd56_hal::clocks::{Clock, Config, Perf, RccExt};
+use cxd56_hal::clocks::{Clock, Config, Hp, PerfState, RccExt};
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac;
 use cxd56_hal::timer::{Prescaler, Timer};
@@ -45,7 +47,7 @@ use cxd56_hal::uart::{Uart, Uart1Pins, UartConfig};
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 // UART1 borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
 // `Clock` must outlive the `'static` UART stored in `SERIAL`.
-static CLOCK: StaticCell<Clock> = StaticCell::new();
+static CLOCK: StaticCell<Clock<Hp>> = StaticCell::new();
 
 const RTC_HZ: u64 = 32_768;
 const WINDOW_TICKS: u64 = RTC_HZ / 4; // 250 ms
@@ -64,7 +66,7 @@ fn rtc_ticks(rtc: &pac::Rtc0) -> u64 {
 }
 
 /// Real cpu_baseclk (Hz) via SP804 ticks over a fixed RTC window.
-fn measure(clock: &Clock, tok: pac::Timer0, rtc: &pac::Rtc0) -> (u32, pac::Timer0) {
+fn measure<P: PerfState>(clock: &Clock<P>, tok: pac::Timer0, rtc: &pac::Rtc0) -> (u32, pac::Timer0) {
     let mut timer = Timer::new(tok, clock).expect("cpu base clock unavailable");
     timer.start_free_running(Prescaler::Div1);
     let r0 = rtc_ticks(rtc);
@@ -87,20 +89,20 @@ fn verdict(ok: bool) -> &'static str {
 #[entry]
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
-    let mut clock = dp.crg.constrain(Config::default()).into_clock();
+    let clock = dp.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
     let rtc = dp.rtc0;
     let mut tok = dp.timer0;
 
     // --- Measure across HP -> LP -> HP with NO printing (capture to RAM). ------
 
-    // [1] HP (boot).
+    // [1] HP (locked at construction).
     let believed_hp = clock.cpu_baseclk().to_Hz();
     let (meas_hp, t) = measure(&clock, tok, &rtc);
     tok = t;
 
-    // -> LP. request_perf drives the full multi-step handshake; resample_dyn
+    // -> LP. into_lp drives the full multi-step handshake; resample_dyn
     // refreshes the cached COM the console will be sized from.
-    clock.request_perf(Perf::Lp).expect("request_perf(Lp) failed");
+    let clock = clock.into_lp().expect("into_lp failed");
     let cached_com_lp = clock.com().hz().to_Hz();
     let live_com_lp = clock.freeze().com.to_Hz();
     let believed_lp = clock.cpu_baseclk().to_Hz();
@@ -108,7 +110,7 @@ fn main() -> ! {
     tok = t;
 
     // -> HP (recover).
-    clock.request_perf(Perf::Hp).expect("request_perf(Hp) failed");
+    let clock = clock.into_hp().expect("into_hp failed");
     let believed_hp2 = clock.cpu_baseclk().to_Hz();
     let (meas_hp2, _t) = measure(&clock, tok, &rtc);
 
@@ -121,7 +123,7 @@ fn main() -> ! {
     let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), clock).expect("uart1 init failed");
     defmt_serial::defmt_serial(SERIAL.init(uart1));
 
-    defmt::println!("clock_perf: request_perf operating-point round-trip (HP->LP->HP)");
+    defmt::println!("clock_perf: into_lp/into_hp operating-point round-trip (HP->LP->HP)");
     let mut all_ok = true;
 
     let hp_ok = within(meas_hp, believed_hp, TOL_PCT);

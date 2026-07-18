@@ -22,9 +22,10 @@
 //! [`watchdog`](crate::watchdog) runs from, and what NuttX's `cxd56_timer.c`
 //! samples via `cxd56_get_cpu_baseclk()`. An operating-point change while a
 //! timer runs would silently rescale every period mid-count, so [`Timer`]
-//! borrows the [`Clock`] for `'clk`: while a timer is alive,
-//! [`Clock::request_perf`](crate::clocks::Clock::request_perf) (which needs
-//! `&mut Clock`) cannot be called. To change the operating point,
+//! borrows the [`Clock`] for `'clk`: while a timer is alive, an
+//! operating-point change ([`Clock::into_hp`](crate::clocks::Clock::into_hp) /
+//! [`Clock::into_lp`](crate::clocks::Clock::into_lp), which need ownership of
+//! the `Clock`) cannot happen. To change the operating point,
 //! [`free`](Timer::free) the timer first, change perf, then create a new one.
 //!
 //! A `CONTROL.DIV` prescaler (/1, /16, /256) sits between the base clock and
@@ -78,7 +79,7 @@ use embedded_hal_nb::nb;
 use fugit::{Hertz, MicrosDurationU32, MicrosDurationU64};
 use thiserror::Error;
 
-use crate::clocks::Clock;
+use crate::clocks::{Clock, PerfState};
 use crate::pac;
 
 /// Input-clock prescaler between the CPU base clock and the counter
@@ -201,13 +202,14 @@ pub struct Timer<'clk, T: TimerPeriph> {
     /// Exclusive hardware ownership; `Deref`s to the register block.
     periph: T,
     /// CPU base clock sampled at construction — kept valid by the `'clk`
-    /// borrow, which blocks `Clock::request_perf`.
+    /// borrow, which blocks the `into_hp`/`into_lp` transitions.
     freq: Hertz<u32>,
     /// Prescaler of the last `start_*` call, for [`elapsed`](Self::elapsed).
     div: Prescaler,
     /// LOAD value of the last `start_*` call, for [`elapsed`](Self::elapsed).
     load: u32,
-    /// Ties this timer to the `Clock` borrow, blocking `request_perf`.
+    /// Ties this timer to the `Clock` borrow, blocking the
+    /// `into_hp`/`into_lp` transitions.
     _clk: PhantomData<&'clk ()>,
 }
 
@@ -221,7 +223,7 @@ impl<'clk, T: TimerPeriph> Timer<'clk, T> {
     /// INTENABLE) and INTCLR is pulsed. After `new()` MIS is guaranteed clear,
     /// so unmasking the NVIC line at any later point cannot take a spurious
     /// interrupt.
-    pub fn new(timer: T, clock: &'clk Clock) -> Result<Self, TimerError> {
+    pub fn new<P: PerfState>(timer: T, clock: &'clk Clock<P>) -> Result<Self, TimerError> {
         let freq = clock.cpu_baseclk();
         if freq.to_Hz() == 0 {
             return Err(TimerError::ClockUnavailable);

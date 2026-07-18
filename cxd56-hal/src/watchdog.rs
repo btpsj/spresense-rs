@@ -20,9 +20,10 @@
 //! the reset; the chip resets only `timeout` after the last successful feed.
 //!
 //! Because the timeout depends on the operating point, [`Watchdog`] borrows the
-//! [`Clock`] for `'clk`: while a watchdog is alive,
-//! [`Clock::request_perf`](crate::clocks::Clock::request_perf) (which needs
-//! `&mut Clock`) cannot be called, guaranteeing the configured timeout stays
+//! [`Clock`] for `'clk`: while a watchdog is alive, an operating-point change
+//! ([`Clock::into_hp`](crate::clocks::Clock::into_hp) /
+//! [`Clock::into_lp`](crate::clocks::Clock::into_lp), which need ownership of
+//! the `Clock`) cannot happen, guaranteeing the configured timeout stays
 //! valid. To change the operating point, [`free`](Watchdog::free) the watchdog
 //! first, change perf, then create a new one.
 //!
@@ -45,7 +46,7 @@ use core::ptr::NonNull;
 use fugit::MillisDurationU32;
 use thiserror::Error;
 
-use crate::clocks::Clock;
+use crate::clocks::{Clock, PerfState};
 use crate::pac;
 
 /// Maximum supported timeout, mirroring NuttX `WDT_MAX_TIMEOUT` (40 s).
@@ -93,7 +94,8 @@ pub struct Watchdog<'clk> {
     inner: sp805::Watchdog<'static>,
     /// Exclusive hardware ownership.
     _wdog: pac::Wdog,
-    /// Ties this watchdog to the `Clock` borrow, blocking `request_perf`.
+    /// Ties this watchdog to the `Clock` borrow, blocking the
+    /// `into_hp`/`into_lp` transitions.
     _clk: PhantomData<&'clk ()>,
 }
 
@@ -109,10 +111,10 @@ impl<'clk> Watchdog<'clk> {
     /// reload value is computed from [`Clock::cpu_baseclk`] at this point and
     /// fixed for the watchdog's lifetime (the borrow prevents an operating-point
     /// change that would invalidate it). Call [`start`](Self::start) to arm.
-    pub fn new(
+    pub fn new<P: PerfState>(
         wdog: pac::Wdog,
         timeout: MillisDurationU32,
-        clock: &'clk Clock,
+        clock: &'clk Clock<P>,
     ) -> Result<Self, WatchdogError> {
         let freq = clock.cpu_baseclk().to_Hz();
         let load = timeout_to_load(freq, timeout.to_millis())?;

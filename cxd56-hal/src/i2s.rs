@@ -27,13 +27,14 @@
 //! The I2S0 timing reference is the **audio MCLK**, which on the Spresense main
 //! board is the **external audio crystal** ([`AudMclk::Ext`]). That is a
 //! [`Fixed`](crate::clocks::Fixed) clock — it does not track `appsmp`, the
-//! quantity changed by [`Clock::request_perf`]. Master BCK/LRCK therefore stay
-//! correct across HP↔LP transitions, so (like [`crate::i2c::I2c`]) there is
-//! no need to hold a `&Clock` borrow after construction.
+//! quantity changed by an operating-point transition ([`Clock::into_hp`]/
+//! [`Clock::into_lp`]). Master BCK/LRCK therefore stay correct across HP↔LP
+//! transitions, so (like [`crate::i2c::I2c`]) there is no need to hold a
+//! `&Clock` borrow after construction.
 
 use core::marker::PhantomData;
 
-use crate::clocks::{AudMclk, Clock, ClockError, audio_clock_disable, audio_clock_enable};
+use crate::clocks::{AudMclk, Clock, ClockError, PerfState, audio_clock_disable, audio_clock_enable};
 use crate::gpio::GpioPin;
 use crate::pac;
 use crate::regs::topreg;
@@ -409,14 +410,14 @@ impl<P: I2sPort> I2s<P> {
     /// `clock` is taken to mirror the other peripheral constructors and to require
     /// the clock tree to be brought up first; the I2S0 timing reference (audio
     /// MCLK) is [`Fixed`](crate::clocks::Fixed), so the borrow ends here and
-    /// [`Clock::request_perf`] stays callable afterwards (no lifetime retained).
+    /// the clock may be transitioned freely afterwards (no lifetime retained).
     ///
     /// `pins` enforces at the type level that no other code drives these pads
     /// while I2S0 is live. Call [`I2s::free`] to release them.
-    pub fn new(
+    pub fn new<Q: PerfState>(
         audio: pac::Audio,
         pins: P::Pins,
-        clock: &Clock,
+        clock: &Clock<Q>,
         config: I2sConfig,
     ) -> Result<Self, I2sError> {
         let _ = clock;

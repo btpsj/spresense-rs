@@ -38,11 +38,11 @@ use defmt_serial as _;
 use panic_probe as _;
 use static_cell::StaticCell;
 
-use cxd56_hal::clocks::Clock;
+use cxd56_hal::clocks::{Clock, Hp};
 use cxd56_hal::{pac, uart::Uart};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
-static CLOCK: StaticCell<Clock> = StaticCell::new();
+static CLOCK: StaticCell<Clock<Hp>> = StaticCell::new();
 
 // These constants and helpers are only referenced by the feature-gated
 // `external_loopback` test, so gate them to suppress dead-code warnings.
@@ -117,7 +117,7 @@ mod tests {
         let core = cortex_m::Peripherals::take().unwrap();
 
         let crg = pac.crg.constrain(Config::default());
-        let clock = crate::CLOCK.init(crg.into_clock());
+        let clock = crate::CLOCK.init(crg.into_hp_clock().expect("lock Hp"));
 
         // UART1 for defmt console output. COM clock is Fixed → Uart<'static, Uart1>.
         let parts = Parts::new(pac.topreg);

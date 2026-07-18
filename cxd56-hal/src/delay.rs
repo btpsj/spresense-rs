@@ -4,7 +4,7 @@ use cortex_m::delay::Delay as SystDelay;
 use cortex_m::peripheral::SYST;
 use embedded_hal::delay::DelayNs;
 
-use crate::clocks::{Clock, ClockRef};
+use crate::clocks::{Clock, ClockRef, PerfState};
 
 /// SysTick-backed delay implementing [`DelayNs`], calibrated against the APP
 /// core (Cortex-M4) clock.
@@ -19,10 +19,11 @@ use crate::clocks::{Clock, ClockRef};
 /// invalidates the SysTick calibration, making every delay ~4× too long or
 /// too short.
 ///
-/// `Delay<'clk>` borrows the [`Clock`] for `'clk`, so
-/// [`Clock::request_perf`] (requires `&mut Clock`) cannot be called while a
-/// `Delay` is alive — drop it (or call [`free`](Delay::free)), reconfigure the
-/// operating point, then rebuild with the new rate.
+/// `Delay<'clk>` borrows the [`Clock`] for `'clk`, so an operating-point
+/// change ([`Clock::into_hp`]/[`Clock::into_lp`], which need ownership of the
+/// `Clock`) cannot happen while a `Delay` is alive — drop it (or call
+/// [`free`](Delay::free)), reconfigure the operating point, then rebuild with
+/// the new rate.
 pub struct Delay<'clk> {
     inner: SystDelay,
     _life: PhantomData<&'clk ()>,
@@ -30,17 +31,17 @@ pub struct Delay<'clk> {
 
 impl<'clk> Delay<'clk> {
     /// Create a `Delay` calibrated to the current APP core frequency read from
-    /// `clock`. Borrows `clock` for `'clk`, blocking [`Clock::request_perf`]
-    /// until this `Delay` is dropped.
+    /// `clock`. Borrows `clock` for `'clk`, blocking the `into_hp`/`into_lp`
+    /// transitions until this `Delay` is dropped.
     ///
     /// ```ignore
-    /// let mut clock = crg.into_clock();
+    /// let clock = crg.into_hp_clock()?;
     /// let delay = Delay::new(cp.SYST, &clock);
-    /// // clock.request_perf(Perf::Lp)?;  // ← E0502 while `delay` is live
+    /// // let clock = clock.into_lp()?;  // ← E0505 while `delay` is live
     /// drop(delay);
-    /// clock.request_perf(Perf::Lp)?;     // ← now fine
+    /// let clock = clock.into_lp()?;     // ← now fine
     /// ```
-    pub fn new(syst: SYST, clock: &'clk Clock) -> Self {
+    pub fn new<P: PerfState>(syst: SYST, clock: &'clk Clock<P>) -> Self {
         Self {
             inner: SystDelay::new(syst, clock.appsmp().hz().to_Hz()),
             _life: PhantomData,

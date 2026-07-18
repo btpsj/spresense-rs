@@ -66,7 +66,7 @@ fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
 
     let crg = dp.crg.constrain(Config::default());
-    let clock = crg.into_clock();
+    let clock = crg.into_hp_clock().expect("lock Hp");
 
     // UART1 console
     let parts = Parts::new(dp.topreg);

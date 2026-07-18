@@ -5,9 +5,10 @@
 //!
 //! - The struct is generic over the PAC SPI token (`pac::Spi5`).
 //! - `SPI5` uses the **dynamic** `img_wspi` clock (derived from `appsmp` via a
-//!   gear divider, re-sampled by [`Clock::request_perf`]). Therefore
-//!   `Spi::new` returns `Spi<'clk, pac::Spi5>`, where `'clk` borrows the
-//!   [`Clock`] and prevents a perf-mode change while the bus is live.
+//!   gear divider, re-sampled on an operating-point change —
+//!   [`Clock::into_hp`]/[`Clock::into_lp`]). Therefore `Spi::new` returns
+//!   `Spi<'clk, pac::Spi5>`, where `'clk` borrows the [`Clock`] and prevents
+//!   a perf-mode change while the bus is live.
 //!
 //! # Supported peripherals
 //!
@@ -54,7 +55,7 @@ use embedded_hal::spi::{ErrorType, Mode, SpiBus, MODE_0};
 use fugit::Hertz;
 use thiserror::Error;
 
-use crate::clocks::{Clock, ClockError, ClockRef, PeripheralId};
+use crate::clocks::{Clock, ClockError, ClockRef, PerfState, PeripheralId};
 use crate::gpio::GpioPin;
 use crate::pac;
 use crate::regs::topreg;
@@ -148,7 +149,7 @@ mod sealed {
 
     use fugit::Hertz;
 
-    use crate::clocks::{Clock, ClockRef, PeripheralId};
+    use crate::clocks::{Clock, ClockRef, PerfState, PeripheralId};
     use crate::pac;
 
     /// Private trait that bounds [`super::SpiPeriph`].
@@ -170,7 +171,7 @@ mod sealed {
         /// Sample this peripheral's base clock from the [`Clock`] snapshot.
         /// Returns a `Copy` [`Hertz`] so the borrow of `clock` ends here; the
         /// lifetime tie lives in `Output`
-        fn base_hz(clock: &Clock) -> Hertz<u32>;
+        fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32>;
 
         /// Sample this peripheral's base clock from a shared [`ClockRef`]
         /// (Option-2 path). Used by [`super::Spi::from_ref`]; does an `Acquire`
@@ -207,8 +208,9 @@ pub trait SpiPeriph: sealed::Sealed {
     /// `&Clock` borrow.
     ///
     /// `pac::Spi5` → `Spi<'clk, pac::Spi5>`: `img_wspi` is a `Dyn` clock
-    /// that changes with [`Clock::request_perf`]; the `Spi` borrows `Clock`
-    /// for `'clk`, blocking perf changes until dropped.
+    /// that changes with the operating point ([`Clock::into_hp`] /
+    /// [`Clock::into_lp`]); the `Spi` borrows `Clock` for `'clk`, blocking
+    /// perf changes until dropped.
     type Output<'clk>;
 
     /// GPIO pin bundle consumed at construction and returned by [`Spi::free`].
@@ -229,7 +231,7 @@ impl sealed::Sealed for pac::Spi5 {
         spi5_unpinmux();
     }
 
-    fn base_hz(clock: &Clock) -> Hertz<u32> {
+    fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32> {
         // img_wspi is Dyn, computed from the configured gear divisor
         // (Config::gear) — the same value spi5_enable() programs — so the
         // snapshot is correct without re-reading hardware.
@@ -261,8 +263,8 @@ impl SpiPeriph for pac::Spi5 {
 ///
 /// The lifetime `'clk` is tied to the [`Clock`] borrow:
 /// - `pac::Spi5` → `Spi<'clk, pac::Spi5>`: `img_wspi` is Dyn; the `Spi`
-///   borrows `Clock` for `'clk`, preventing [`Clock::request_perf`] until
-///   dropped
+///   borrows `Clock` for `'clk`, preventing the `into_hp`/`into_lp`
+///   transitions until dropped
 ///
 /// Use [`Spi::new`] to construct; `S` is inferred from the PAC token passed.
 pub struct Spi<'clk, S: SpiPeriph> {
@@ -284,13 +286,14 @@ impl<'clk, S: SpiPeriph> Spi<'clk, S> {
     ///
     /// The return type is resolved through [`SpiPeriph::Output`]:
     /// - `S = pac::Spi5` → [`Spi<'a, pac::Spi5>`]: `img_wspi` is Dyn; the
-    ///   returned `Spi` borrows `clock` for `'a`, preventing
-    ///   [`Clock::request_perf`] until dropped.
+    ///   returned `Spi` borrows `clock` for `'a`, preventing an
+    ///   operating-point change ([`Clock::into_hp`] / [`Clock::into_lp`],
+    ///   which need ownership of the `Clock`) until dropped.
     ///
     /// `pins` enforces at the type level that no other code can use these pads
     /// as GPIO while the bus is live. Call [`Spi::free`] to release them.
     #[allow(clippy::new_ret_no_self)] // intentional: returns S::Output<'a>
-    pub fn new<'a>(spi: S, pins: S::Pins, config: SpiConfig, clock: &'a Clock)
+    pub fn new<'a, P: PerfState>(spi: S, pins: S::Pins, config: SpiConfig, clock: &'a Clock<P>)
         -> Result<S::Output<'a>, SpiError>
     {
         // Enable clock gate (spi5_enable: AppSub domain + img_acquire +

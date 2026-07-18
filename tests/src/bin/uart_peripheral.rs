@@ -22,7 +22,7 @@ use panic_probe as _;
 use static_cell::StaticCell;
 
 use cxd56_hal::{
-    clocks::{Clock, Config, RccExt},
+    clocks::{Clock, Config, Hp, RccExt},
     uart::{Uart, Uart2Pins, UartConfig},
 };
 use cxd56_hal::{gpio::pins::Parts, pac, uart::Uart1Pins};
@@ -30,7 +30,7 @@ use cxd56_hal::{gpio::pins::Parts, pac, uart::Uart1Pins};
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 // UART1 now borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
 // `Clock` must outlive the `'static` UART stored in `SERIAL`.
-static CLOCK: StaticCell<Clock> = StaticCell::new();
+static CLOCK: StaticCell<Clock<Hp>> = StaticCell::new();
 
 /// Transmit one byte and read it straight back (loopback), asserting a match.
 fn echo_byte(uart: &mut Uart<'_, pac::Uart2>, expect: u8) -> Result<(), &'static str> {
@@ -63,7 +63,7 @@ fn run_pattern(uart: &mut Uart<'_, pac::Uart2>) -> Result<(), &'static str> {
 fn uart2_internal_loopback(
     uart2: pac::Uart2,
     pins: Uart2Pins,
-    clocks: &Clock,
+    clocks: &Clock<Hp>,
 ) -> Result<(), &'static str> {
     let mut uart = Uart::new(
         uart2,
@@ -83,7 +83,7 @@ fn uart2_internal_loopback(
 fn uart2_external_loopback(
     uart2: pac::Uart2,
     pins: Uart2Pins,
-    clocks: &Clock,
+    clocks: &Clock<Hp>,
 ) -> Result<(), &'static str> {
     let mut uart =
         Uart::new(uart2, pins, UartConfig::default(), clocks).map_err(|_| "Uart::new failed")?;
@@ -97,7 +97,7 @@ fn main() -> ! {
     let crg = pac.crg.constrain(Config::default());
     // Promote the clock to `'static` so the UART1 console (which borrows it)
     // can be stored in the `'static` `SERIAL` cell.
-    let clock = CLOCK.init(crg.into_clock());
+    let clock = CLOCK.init(crg.into_hp_clock().expect("lock Hp"));
 
     // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
     let parts = Parts::new(pac.topreg);

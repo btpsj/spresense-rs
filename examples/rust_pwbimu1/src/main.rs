@@ -54,7 +54,7 @@ fn main() -> ! {
     let core = CorePeripherals::take().unwrap();
 
     let crg = pac.crg.constrain(Config::default());
-    let clock = crg.into_clock();
+    let clock = crg.into_hp_clock().expect("lock Hp");
 
     let parts = Parts::new(pac.topreg);
 

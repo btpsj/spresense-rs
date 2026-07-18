@@ -1,20 +1,27 @@
 //! Operating-point **ground-truth** dump (diagnostic, not a pass/fail test).
 //!
 //! Goal: find out what operating point a SYSIOP FREQLOCK→LV transition actually
-//! reaches, register by register, so `request_perf(Perf::Lp)` can be made to
-//! reach the **canonical LV** point from the User Manual (Table UART-792, XOSC
-//! 26 MHz, Low Power Mode): SYSPLL 195.0 MHz (unchanged) · COM 32.5 MHz.
+//! reaches, register by register, so the HAL's LV transition (`into_lp`) can be
+//! made to reach the **canonical LV** point from the User Manual (Table
+//! UART-792, XOSC 26 MHz, Low Power Mode): SYSPLL 195.0 MHz (unchanged) ·
+//! COM 32.5 MHz.
 //!
 //! Design notes (learned the hard way):
 //!   * The LP console is unusable, so we **measure at LP but report at HP**:
 //!     snapshot the clock registers into RAM during the excursion, return to
 //!     HP, then print.
 //!   * The PM handshake is driven **manually with bounded `try_recv`** rather
-//!     than the HAL's blocking `request_perf`, so a missing/extra message can
-//!     never hang us — we always make it back to print the data, and we log the
-//!     exact message sequence (how many CLK_CHG pairs, trailing FREQLOCK?).
+//!     than the HAL's blocking FREQLOCK driver (the `into_*_clock`/`into_lp`/
+//!     `into_hp` path), so a missing/extra message can never hang us — we
+//!     always make it back to print the data, and we log the exact message
+//!     sequence (how many CLK_CHG pairs, trailing FREQLOCK?). For the same
+//!     reason no typed [`Clock`](cxd56_hal::clocks::Clock) is ever built: its
+//!     construction locks an operating point (BOOT + FREQLOCK handshake),
+//!     which would both perturb the boot tree we dump first and block on a
+//!     handshake the SYSIOP does not run for a mode already in effect.
 //!   * The console UART is built **last, from a fresh live snapshot** of the
-//!     recovered clock, so its baud is correct no matter where we ended up.
+//!     recovered clock (the lock-free [`ClockRef`] path), so its baud is
+//!     correct no matter where we ended up.
 //!
 //! Run: `cargo run --release --bin clock_dump` (from tests/).
 //! No external jumper. CXD5602 GPIO is 1.8 V.
@@ -28,16 +35,17 @@ use defmt_serial as _;
 use panic_probe as _;
 use static_cell::StaticCell;
 
-use cxd56_hal::clocks::{Clock, Config, RccExt};
+use cxd56_hal::clocks::{ClockRef, Config, Crg, RccExt};
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::multicore::Mailbox;
 use cxd56_hal::pac;
 use cxd56_hal::uart::{Uart, Uart1Pins, UartConfig};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
-// UART1 borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
-// `Clock` must outlive the `'static` UART stored in `SERIAL`.
-static CLOCK: StaticCell<Clock> = StaticCell::new();
+// The console is built over the shared-clock (`from_ref`) path — a typed
+// `Clock` would lock an operating point at construction, which this dump must
+// never do (see the design notes). `ClockRef` must be `'static` for it.
+static CLOCK: StaticCell<ClockRef> = StaticCell::new();
 
 /// `APP_CKSEL` lives in topreg_sub (offset 0x418); read raw like `buses.rs`.
 const APP_CKSEL_ADDR: usize = 0x0410_3418;
@@ -82,10 +90,10 @@ struct Snap {
     gps_cpu: u32,
 }
 
-fn capture(clock: &Clock) -> Snap {
+fn capture(crg: &Crg) -> Snap {
     // SAFETY: fixed MMIO base, read-only access (same invariant as regs.rs).
     let t = unsafe { &*pac::Topreg::PTR };
-    let c = clock.freeze(); // always reads registers live
+    let c = crg.freeze(); // always reads registers live
     Snap {
         cksel_root: t.cksel_root().read().bits(),
         ckdiv_cpu_dsp_bus: t.ckdiv_cpu_dsp_bus().read().bits(),
@@ -174,11 +182,13 @@ fn print_log(label: &str, log: &[(u16, u32)], n: usize, saw_trailing: bool) {
 #[entry]
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
-    let clock = dp.crg.constrain(Config::default()).into_clock();
+    // Constrain only — no typed `Clock`, no operating-point lock: the first
+    // capture below must see the *unperturbed* boot tree.
+    let crg = dp.crg.constrain(Config::default());
 
     // --- Excursion: capture HP, drop to LV, capture LP, return to HV. No UART
     //     and no printing here; everything goes into RAM. ----------------------
-    let hp = capture(&clock);
+    let hp = capture(&crg);
 
     // Boot the PM protocol (SYSIOP learns the target-id table address), settle.
     Mailbox::send_blocking(pm_msg(PM_BOOT, PM_TABLE.as_ptr() as u32));
@@ -186,21 +196,21 @@ fn main() -> ! {
 
     let mut lp_log: [(u16, u32); 24] = [(0, 0); 24];
     let (lp_n, lp_tr) = run_freqlock(FLAG_INITIALIZED | FLAG_LV, &mut lp_log);
-    let lp = capture(&clock);
+    let lp = capture(&crg);
 
     let mut hp_log: [(u16, u32); 24] = [(0, 0); 24];
     let (hp_n, hp_tr) = run_freqlock(FLAG_INITIALIZED | FLAG_HV, &mut hp_log);
-    let hp_recover = capture(&clock);
+    let hp_recover = capture(&crg);
 
     // --- Report: build the console from the *current* live clock (correct baud
     //     wherever we ended up), then print everything. -------------------------
-    // Promote the clock to `'static` so the UART1 console (which borrows it)
-    // can live in `SERIAL`.
-    let clock = CLOCK.init(clock);
-    let now = clock.freeze();
+    // Sample the recovered tree into the `'static` `ClockRef` (lock-free), so
+    // the UART1 console can be built over `from_ref`.
+    let clock = CLOCK.init(ClockRef::from_crg(&crg));
+    let now = crg.freeze();
     let parts = Parts::new(dp.topreg);
     let uart1_pins = Uart1Pins { tx: parts.gp_spi0_cs_x, rx: parts.gp_spi0_sck };
-    let uart1 = Uart::new(dp.uart1, uart1_pins, UartConfig::default(), clock).expect("uart1 init failed");
+    let uart1 = Uart::from_ref(dp.uart1, uart1_pins, UartConfig::default(), clock).expect("uart1 init failed");
     defmt_serial::defmt_serial(SERIAL.init(uart1));
 
     defmt::println!(

@@ -34,8 +34,12 @@ use cxd56_hal::uart::Uart;
 // it via `crate::SERIAL`.
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 // UART1 borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
-// `Clock` must outlive the `'static` UART stored in `SERIAL`.
-static CLOCK: StaticCell<cxd56_hal::clocks::Clock> = StaticCell::new();
+// `Clock` must outlive the `'static` UART stored in `SERIAL`. Its operating
+// point is locked at construction: the LP point under `low-power`, else HP.
+#[cfg(not(feature = "low-power"))]
+static CLOCK: StaticCell<cxd56_hal::clocks::Clock<cxd56_hal::clocks::Hp>> = StaticCell::new();
+#[cfg(feature = "low-power")]
+static CLOCK: StaticCell<cxd56_hal::clocks::Clock<cxd56_hal::clocks::Lp>> = StaticCell::new();
 
 // Forward the active backing's timer interrupt(s) to the driver. RTC: one alarm IRQ.
 // SP804: TIMER0 counts the free-running overflow, TIMER1 is the one-shot alarm.
@@ -148,8 +152,6 @@ mod tests {
     use defmt::assert;
     use embassy_time::{Duration, Instant, Timer};
 
-    #[cfg(feature = "low-power")]
-    use cxd56_hal::clocks::Perf;
     use cxd56_hal::clocks::{Config, RccExt};
     use cxd56_hal::gpio::pins::Parts;
     use cxd56_hal::pac;
@@ -160,11 +162,13 @@ mod tests {
     #[init]
     fn init() -> Ctx {
         let pac = pac::Peripherals::take().unwrap();
-        #[allow(unused_mut)]
-        let mut clock = pac.crg.constrain(Config::default()).into_clock();
+        #[cfg(not(feature = "low-power"))]
+        let clock = pac.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
         #[cfg(feature = "low-power")]
-        clock
-            .request_perf(Perf::Lp)
+        let clock = pac
+            .crg
+            .constrain(Config::default())
+            .into_lp_clock()
             .expect("failed to enter low-power operating point");
 
         // Bring up the embassy time driver (samples the base clock on the SP804

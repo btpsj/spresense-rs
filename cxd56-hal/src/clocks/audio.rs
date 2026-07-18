@@ -19,9 +19,9 @@
 //! SYSIOP M0+ and only reachable via the ICC `FREQLOCK` RPC), the audio MCLK
 //! mux/gate is an APP-local control that NuttX programs with plain `modifyreg32`.
 //! On the Spresense main board the MCLK source is the **external audio crystal**
-//! ([`AudMclk::Ext`]), a fixed clock independent of [`Clock::request_perf`]
-//! ([`crate::clocks::Clock`]) — which is why [`crate::i2s::I2s`] needs no
-//! lifetime.
+//! ([`AudMclk::Ext`]), a fixed clock that never changes with the operating
+//! point ([`crate::clocks::Clock`]) — which is why [`crate::i2s::I2s`] needs
+//! no lifetime.
 
 use super::peripheral::ClockError;
 use super::pmu::{self, PmuDomain};

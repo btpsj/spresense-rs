@@ -45,7 +45,7 @@ fn main() -> ! {
     };
     let crg = pac.crg.constrain(cfg);
 
-    let clocks = crg.into_clock();
+    let clocks = crg.into_hp_clock().expect("lock Hp");
 
     let mut delay = Delay::new(core.SYST, &clocks);
 

@@ -23,9 +23,10 @@
 //!
 //! # Limitations
 //!
-//! This implementation **polls** the CPU FIFO (blocking). Do not call
-//! [`request_perf`] while other cores are actively exchanging CPU-FIFO
-//! messages; non-PM FIFO messages received during the handshake are dropped.
+//! This implementation **polls** the CPU FIFO (blocking). Do not run an
+//! operating-point transition while other cores are actively exchanging
+//! CPU-FIFO messages; non-PM FIFO messages received during the handshake are
+//! dropped.
 //!
 //! # References
 //!
@@ -172,8 +173,8 @@ fn send_pm(proto_data: u32, data: u32) {
 ///
 /// Requesting the mode already in effect is a no-op: the SYSIOP runs no handshake,
 /// so the blocking recv would never return. We track the last mode (seeded to the
-/// boot mode, HV) and skip such requests — mirroring `cxd56_pm_checkfreqlock`'s
-/// `if (g_freqlock_flag != flag)` guard.
+/// unconstrained boot flag) and skip such requests — mirroring
+/// `cxd56_pm_checkfreqlock`'s `if (g_freqlock_flag != flag)` guard.
 ///
 /// # Errors
 ///

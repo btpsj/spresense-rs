@@ -16,7 +16,7 @@ fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
     let core = Peripherals::take().unwrap();
 
-    let clock = pac.crg.constrain(Config::default()).into_clock();
+    let clock = pac.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
 
     let pins = pins::Parts::new(pac.topreg);
     let mut led = pins.gp_i2s1_bck.into_output(Level::Low);

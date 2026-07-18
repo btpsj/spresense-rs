@@ -25,7 +25,7 @@ use critical_section::{CriticalSection, Mutex};
 use embassy_time_driver::{Driver, TICK_HZ};
 use embassy_time_queue_utils::Queue;
 
-use crate::clocks::Clock;
+use crate::clocks::{Clock, PerfState};
 use crate::pac;
 
 // The SP804 rate is rescaled to this fixed embassy tick rate (microseconds).
@@ -148,7 +148,7 @@ impl Driver for Sp804Driver {
 /// Sample the (perf-dependent) base clock, start `TIMER0` free-running as the
 /// monotonic base, leave `TIMER1` idle, and open both interrupt paths. Call once via
 /// [`super::init`], after the operating point is set.
-pub(super) fn init(clock: &Clock) {
+pub(super) fn init<P: PerfState>(clock: &Clock<P>) {
     BASE_HZ.store(clock.cpu_baseclk().to_Hz(), Ordering::Relaxed);
     PERIOD.store(0, Ordering::Relaxed);
 

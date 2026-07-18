@@ -30,7 +30,7 @@ use fugit::Hertz;
 use thiserror::Error;
 
 use crate::clocks::pmu;
-use crate::clocks::{Clock, ClockError, PeripheralId};
+use crate::clocks::{Clock, ClockError, PerfState, PeripheralId};
 use crate::pac;
 
 // ============================================================================
@@ -75,13 +75,13 @@ pub enum AdcError {
 mod sealed {
     use fugit::Hertz;
 
-    use crate::clocks::{Clock, PeripheralId};
+    use crate::clocks::{Clock, PerfState, PeripheralId};
 
     pub trait Sealed {
         const CLOCK_ID: PeripheralId;
         /// Sample the peripheral's base clock. [`Fixed`](crate::clocks::Fixed)
         /// for LPADC, so the borrow of `clock` ends at the call site.
-        fn base_hz(clock: &Clock) -> Hertz<u32>;
+        fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32>;
     }
 }
 
@@ -111,8 +111,8 @@ pub struct LpAdc;
 impl sealed::Sealed for LpAdc {
     const CLOCK_ID: PeripheralId = PeripheralId::LpAdc;
 
-    fn base_hz(clock: &Clock) -> Hertz<u32> {
-        // lpadc is Fixed — never changes with Clock::request_perf.
+    fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32> {
+        // lpadc is Fixed — never changes with the operating point.
         clock.lpadc.hz()
     }
 }
@@ -155,12 +155,12 @@ impl<'clk, T: AdcPeriph> Adc<'clk, T> {
     ///
     /// `clock` is borrowed only to read `T::base_hz`. For LPADC the source is
     /// [`Fixed`](crate::clocks::Fixed) and the borrow ends at this call;
-    /// [`Clock::request_perf`] may be called freely after construction.
-    pub fn new<'a>(
+    /// the clock may be transitioned freely afterwards.
+    pub fn new<'a, P: PerfState>(
         _kind: T,
         adcif: pac::ScuAdcif,
         config: AdcConfig,
-        clock: &'a Clock,
+        clock: &'a Clock<P>,
     ) -> Result<T::Output<'a>, AdcError> {
         let base_hz = T::base_hz(clock).to_Hz();
         T::CLOCK_ID.enable()?;

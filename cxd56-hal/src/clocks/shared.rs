@@ -250,9 +250,11 @@ impl ClockRef {
 ///
 /// # Safety contract
 ///
-/// Unlike [`Clock::request_perf`](super::profile::Clock::request_perf), this
-/// method does **not** have borrow-checker enforcement that all peripherals are
-/// quiesced. The hardware clocks change during the ICC handshake inside this
+/// Unlike an owned [`Clock`](super::profile::Clock)'s consuming transitions
+/// ([`into_hp`](super::profile::Clock::into_hp) /
+/// [`into_lp`](super::profile::Clock::into_lp)), this method does **not**
+/// have borrow-checker enforcement that all peripherals are quiesced. The
+/// hardware clocks change during the ICC handshake inside this
 /// call; any in-flight UART/SPI byte will be corrupted. The caller must ensure
 /// all in-flight operations are complete (e.g. by calling `flush()`) before
 /// invoking `request_perf`. After the call, baud/gear divisors cached in

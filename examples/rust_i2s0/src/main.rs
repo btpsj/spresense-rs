@@ -32,7 +32,7 @@ fn main() -> ! {
     let core = Peripherals::take().unwrap();
 
     let crg = pac.crg.constrain(Config::default());
-    let clocks = crg.into_clock();
+    let clocks = crg.into_hp_clock().expect("lock Hp");
 
     let mut delay = Delay::new(core.SYST, &clocks);
     let parts = Parts::new(pac.topreg);

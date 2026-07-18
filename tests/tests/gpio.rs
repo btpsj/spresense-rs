@@ -42,7 +42,7 @@ use cxd56_hal::pac::{Interrupt, interrupt};
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 // UART1 now borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
 // `Clock` must outlive the `'static` UART stored in `SERIAL`.
-static CLOCK: StaticCell<cxd56_hal::clocks::Clock> = StaticCell::new();
+static CLOCK: StaticCell<cxd56_hal::clocks::Clock<cxd56_hal::clocks::Hp>> = StaticCell::new();
 
 /// In-`join` pacing for the loopback driver: wait this many RTC ticks before
 /// driving the edge, so the concurrent `wait_for_*_edge` has finished arming first
@@ -216,7 +216,7 @@ mod tests {
         let pac = pac::Peripherals::take().unwrap();
         // Promote the clock to `'static` so the UART1 console (which borrows it)
         // can be stored in the `'static` `SERIAL` cell.
-        let clock = crate::CLOCK.init(pac.crg.constrain(Config::default()).into_clock());
+        let clock = crate::CLOCK.init(pac.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp"));
 
         // Sample the async-delay source's input clock and open its interrupt path.
         // Backing-agnostic: a no-op beyond opening the gate for the perf-invariant

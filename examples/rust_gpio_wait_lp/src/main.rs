@@ -1,8 +1,9 @@
 //! Async GPIO interrupt (EXDEVICE) demo at the **low-power** operating point.
 //!
-//! Identical to the `rust_gpio_wait` example but switches the APP CPU to
-//! [`Perf::Lp`] (~39 MHz, VDD_CORE 0.7 V) before doing anything, to confirm the
-//! async EXDEVICE edge handling still works at the slowest core clock.
+//! Identical to the `rust_gpio_wait` example but locks the APP CPU at
+//! [`Perf::Lp`](cxd56_hal::clocks::Perf::Lp) (31.2 MHz, VDD_CORE 0.7 V) from
+//! construction, to confirm the async EXDEVICE edge handling still works at
+//! the slowest core clock.
 //!
 //! The GPIO edge detector is clocked by the fixed 32.768 kHz RTC, so the HAL's
 //! edge-arm baseline settle is a fixed *real* time (~488 µs, independent of the
@@ -37,7 +38,7 @@
 //! phase B: wait_for_falling_edge -> ok
 //! gpio wait demo complete
 //! ```
-//! (The exact APP CPU figure depends on the XOSC; ~39 MHz at the LP point.)
+//! (The exact APP CPU figure depends on the XOSC; 31.2 MHz at the LP point.)
 //!
 //! CXD5602 GPIO is 1.8 V — never wire these pins to 3.3/5 V.
 
@@ -50,7 +51,7 @@ use cortex_m_rt::entry;
 use panic_halt as _;
 
 use cxd56_hal::async_delay::{self, Delay};
-use cxd56_hal::clocks::{Config, Perf, RccExt};
+use cxd56_hal::clocks::{Config, RccExt};
 use cxd56_hal::gpio::{self, Level, Trigger, Wait, pins::Parts};
 use cxd56_hal::pac::{self, Interrupt, interrupt};
 use cxd56_hal::uart::{Uart, Uart1Pins};
@@ -92,13 +93,14 @@ fn TIMER0() {
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
 
-    // Drop to the low-power operating point *before* the UART is created, so the
+    // Lock the low-power operating point *before* the UART is created, so the
     // UART computes its baud divisor from the LP clock. If this RPC to the SYSIOP
     // loader fails the board halts here (before any output) — no output on an
     // otherwise-correct setup means the perf switch itself failed.
-    let mut clock = dp.crg.constrain(Config::default()).into_clock();
-    clock
-        .request_perf(Perf::Lp)
+    let clock = dp
+        .crg
+        .constrain(Config::default())
+        .into_lp_clock()
         .expect("failed to enter low-power operating point");
 
     // `into_floating_input()` enables the CTS pad's input buffer (ENZI) and sets
@@ -142,7 +144,7 @@ fn main() -> ! {
     // Confirm the async-delay backing the edge-arm settle sleeps on. The name and
     // rate come from the HAL, so this validates the `backing-*` feature reached
     // `cxd56-hal`. With `--features backing-timer` this prints `SP804 TIMER0` at
-    // the *LP* CPU base clock (~39 MHz) — proof the SP804 sampled the slow clock
+    // the *LP* CPU base clock (31.2 MHz) — proof the SP804 sampled the slow clock
     // yet still holds the right ~488 µs settle — vs `RTC0 alarm 0` at 32768 Hz.
     let _ = writeln!(
         uart,

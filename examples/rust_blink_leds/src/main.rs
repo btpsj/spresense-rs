@@ -31,7 +31,7 @@ fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
     let core = Peripherals::take().unwrap();
 
-    let clock = pac.crg.constrain(Config::default()).into_clock();
+    let clock = pac.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
 
     // All four board LEDs are on the I2S1 pins; configure each as a low output.
     let pins = pins::Parts::new(pac.topreg);

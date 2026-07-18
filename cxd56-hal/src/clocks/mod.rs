@@ -14,8 +14,13 @@
 //!   retune at runtime with [`Clock::set_gear`] (raw divisor) or
 //!   [`Clock::set_spi_gear`] (target a max SPI frequency), and read the live
 //!   register back with [`PeripheralId::gear_divisor`].
-//! - **Requests** CPU/bus operating-point changes (HP ≈ 156 MHz / LP ≈ 39 MHz)
-//!   from the SYSIOP over the ICC CPU-FIFO protocol via [`Clock::request_perf`].
+//! - **Locks** the CPU/bus operating point (HV: APP 156 MHz / LV: APP
+//!   31.2 MHz) at construction — [`Crg::into_hp_clock`] /
+//!   [`Crg::into_lp_clock`] — over the SYSIOP's ICC CPU-FIFO FREQLOCK
+//!   protocol, and moves it only by consuming transition
+//!   ([`Clock::into_hp`] / [`Clock::into_lp`]). A [`Clock`] is never
+//!   unconstrained; to observe the tree without locking it, sample via
+//!   [`ClockRef::from_crg`].
 //!
 //! # Entry point
 //!
@@ -51,7 +56,7 @@ pub mod sources;
 pub use audio::{AudMclk, audio_clock_disable, audio_clock_enable};
 pub use peripheral::{ClockError, GearError, I2cPort, PeripheralId, SpiPort};
 pub use pm::{PmError, Perf};
-pub use profile::{Clock, Dyn, Fixed};
+pub use profile::{Clock, Dyn, Fixed, Hp, Lp, PerfState};
 pub use shared::{ClockRef, PerfControl};
 
 /// Board-level clock configuration.
@@ -146,13 +151,32 @@ impl Crg {
         Clocks::sample(self.cfg)
     }
 
-    /// Consume this `Crg` and return an owned [`Clock`] snapshot.
+    /// Consume this `Crg`, **lock the operating point at HV** ([`Perf::Hp`]:
+    /// APP CPU 156 MHz, VDD_CORE ≈ 1.0 V), and return the typed [`Clock`].
     ///
-    /// Mirrors the `.constrain().freeze()` idiom for the profile-aware path.
-    /// The returned [`Clock`] owns the `Crg` and exposes
-    /// [`Clock::request_perf`] for runtime operating-point changes.
-    pub fn into_clock(self) -> Clock {
-        Clock::new(self)
+    /// Stock-default parity: NuttX with dynamic clock control disabled (the
+    /// factory default) runs the maximum system clock permanently. Choose
+    /// [`into_lp_clock`](Self::into_lp_clock) for the 0.7 V low-power point
+    /// instead. There is deliberately no unconstrained variant — the
+    /// cold-boot tree cannot be locked or reliably re-entered; observe it
+    /// read-only via [`ClockRef::from_crg`] if needed.
+    ///
+    /// Sends the SYSIOP PM bring-up pair (`MSGID_BOOT` + `FREQLOCK`) exactly
+    /// like stock board init, so the first lock always runs a real handshake
+    /// — even after a warm reboot that inherited a previous operating point
+    /// (the SYSIOP survives APP resets).
+    pub fn into_hp_clock(self) -> Result<Clock<Hp>, PmError> {
+        Clock::lock(self)
+    }
+
+    /// Consume this `Crg`, **lock the operating point at LV** ([`Perf::Lp`]:
+    /// APP CPU 31.2 MHz, VDD_CORE ≈ 0.7 V — the low-power point), and return
+    /// the typed [`Clock`]. COM and the other Dyn clocks drop with it, so
+    /// UART/SPI/I2C divisors are computed from the slower base rates. See
+    /// [`into_hp_clock`](Self::into_hp_clock) for the bring-up handshake
+    /// notes.
+    pub fn into_lp_clock(self) -> Result<Clock<Lp>, PmError> {
+        Clock::lock(self)
     }
 
     /// Consume this `Crg` and produce a [`PerfControl`] bound to `shared`, the
@@ -160,7 +184,7 @@ impl Crg {
     ///
     /// `shared` must have been initialised from this same `Crg` via
     /// [`ClockRef::from_crg`] and placed in `'static` storage. Unlike
-    /// [`into_clock`](Self::into_clock), the returned [`PerfControl`] holds no
+    /// [`into_hp_clock`](Self::into_hp_clock), the returned [`PerfControl`] holds no
     /// borrow of the clock state — `shared` and `perf_ctl` are independent, so
     /// peripherals built with `from_ref(shared)` are `'static`. See
     /// [`PerfControl`] for the safety contract around runtime perf changes.

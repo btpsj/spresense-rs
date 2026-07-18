@@ -99,7 +99,7 @@ fn main() -> ! {
     let mut core = Peripherals::take().unwrap();
 
     let crg = pac.crg.constrain(Config::default());
-    let clocks = crg.into_clock();
+    let clocks = crg.into_hp_clock().expect("lock Hp");
 
     // Enable the DWT cycle counter for the on-chip BCK/LRCK rate check (see the
     // loop). DWT CYCCNT ticks at the **core clock** (FCLK = `appsmp`, the same

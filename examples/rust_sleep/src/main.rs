@@ -41,13 +41,13 @@ use cxd56_hal::clocks::{Config, RccExt};
 use cxd56_hal::gpio::{Trigger, pins::Parts};
 use cxd56_hal::pac;
 use cxd56_hal::sleep::{self, boot};
-use cxd56_hal::uart_alt::{Uart, Uart1Pins};
+use cxd56_hal::uart::{Uart, Uart1Pins};
 
 #[entry]
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
 
-    let clock = dp.crg.constrain(Config::default()).into_clock();
+    let clock = dp.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
 
     let parts = Parts::new(dp.topreg);
     let uart1_pins = Uart1Pins {

@@ -29,11 +29,11 @@ use defmt_serial as _;
 use panic_probe as _;
 use static_cell::StaticCell;
 
-use cxd56_hal::clocks::Clock;
+use cxd56_hal::clocks::{Clock, Hp};
 use cxd56_hal::{pac, uart::Uart};
 
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
-static CLOCK: StaticCell<Clock> = StaticCell::new();
+static CLOCK: StaticCell<Clock<Hp>> = StaticCell::new();
 
 /// Pattern that exercises all-zeros, all-ones, alternating bits, and ASCII.
 const PATTERN: [u8; 8] = [0xA5, 0x5A, 0x00, 0xFF, b'R', b'U', b'S', b'T'];
@@ -57,7 +57,7 @@ mod tests {
     fn init() -> State {
         let pac = pac::Peripherals::take().unwrap();
         let crg = pac.crg.constrain(Config::default());
-        let clock = crate::CLOCK.init(crg.into_clock());
+        let clock = crate::CLOCK.init(crg.into_hp_clock().expect("lock Hp"));
 
         // UART1 for defmt console output. COM clock is Fixed → Uart<'static, Uart1>.
         let parts = Parts::new(pac.topreg);

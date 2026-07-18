@@ -60,7 +60,7 @@ use core::task::{Context, Poll, Waker};
 use cortex_m::peripheral::NVIC;
 use critical_section::Mutex;
 
-use crate::clocks::Clock;
+use crate::clocks::{Clock, PerfState};
 use crate::pac;
 
 // =============================================================================
@@ -90,7 +90,7 @@ trait TickSource {
 
     /// Sample any perf-dependent input clock the source needs. No-op default for
     /// fixed-rate sources; the timer backing latches the CPU base clock here.
-    fn set_clock(_clock: &Clock) {}
+    fn set_clock<P: PerfState>(_clock: &Clock<P>) {}
 
     /// Arm a one-shot wake `ticks` from now and return a source-defined token the
     /// poll hands back to [`expired`](Self::expired): an absolute deadline (tick
@@ -212,7 +212,7 @@ mod rtc {
 #[cfg(feature = "async-delay-timer")]
 mod timer {
     use super::TickSource;
-    use crate::clocks::Clock;
+    use crate::clocks::{Clock, PerfState};
     use crate::pac;
     use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -260,7 +260,7 @@ mod timer {
             hz
         }
 
-        fn set_clock(clock: &Clock) {
+        fn set_clock<P: PerfState>(clock: &Clock<P>) {
             BASE_HZ.store(clock.cpu_baseclk().to_Hz(), Ordering::Relaxed);
             // Clear any latched state a boot stage may have left in the channel so
             // the first delay's `expired` does not read a stale raw-pending.
@@ -397,7 +397,7 @@ fn ensure_init() {
 /// free-function delay API and do not want to reserve a [`Delay`] handle. The
 /// operating point must not change between this call and an in-flight timer-backed
 /// delay (the RTC backing is immune).
-pub fn init(clock: &Clock) {
+pub fn init<P: PerfState>(clock: &Clock<P>) {
     Source::set_clock(clock);
     ensure_init();
 }
@@ -512,7 +512,7 @@ impl Delay {
     /// Reserve the RTC as an async delay source and open its interrupt path. The
     /// RTC is perf-invariant, so the [`Clock`] is only sampled for API symmetry
     /// with the timer backing.
-    pub fn new(rtc: pac::Rtc0, clock: &Clock) -> Self {
+    pub fn new<P: PerfState>(rtc: pac::Rtc0, clock: &Clock<P>) -> Self {
         init(clock);
         Self { _rtc: rtc }
     }
@@ -534,7 +534,7 @@ impl Delay {
     /// operating point must not change while a delay handed out here is in flight
     /// (the SP804 rate would rescale mid-count) — free the handle, change perf,
     /// then make a new one, exactly as [`Timer`](crate::timer::Timer) requires.
-    pub fn new(timer: pac::Timer0, clock: &Clock) -> Self {
+    pub fn new<P: PerfState>(timer: pac::Timer0, clock: &Clock<P>) -> Self {
         init(clock);
         Self { _timer: timer }
     }

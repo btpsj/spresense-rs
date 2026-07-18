@@ -8,7 +8,7 @@ use embedded_io;
 use fugit::Hertz;
 use thiserror::Error;
 
-use crate::clocks::{Clock, ClockError, ClockRef, PeripheralId};
+use crate::clocks::{Clock, ClockError, ClockRef, PerfState, PeripheralId};
 use crate::gpio::GpioPin;
 use crate::pac;
 use crate::regs::topreg;
@@ -156,7 +156,7 @@ mod sealed {
     use fugit::Hertz;
 
     use super::pac;
-    use crate::clocks::{Clock, ClockRef, PeripheralId};
+    use crate::clocks::{Clock, ClockRef, PerfState, PeripheralId};
 
     pub trait Sealed {
         const ID: PeripheralId;
@@ -174,7 +174,7 @@ mod sealed {
 
         /// Sample this peripheral's base clock. Returns a `Copy` [`Hertz`] so
         /// the borrow of `clock` ends here; any lifetime tie lives in `Output`.
-        fn base_hz(clock: &Clock) -> Hertz<u32>;
+        fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32>;
 
         /// Sample this peripheral's base clock from a shared [`ClockRef`]
         /// (Option-2 path). Used by [`Uart::from_ref`]; does an `Acquire`
@@ -218,10 +218,12 @@ pub trait UartPeriph: sealed::Sealed {
     ///
     /// - `pac::Uart1`: `Output<'clk> = Uart<'clk, pac::Uart1>` — COM is a Dyn
     ///   clock that tracks the operating point; the UART borrows `Clock` for
-    ///   `'clk`, blocking [`Clock::request_perf`] until dropped.
+    ///   `'clk`, blocking an operating-point change ([`Clock::into_hp`] /
+    ///   [`Clock::into_lp`], which need ownership of the `Clock`) until
+    ///   dropped.
     /// - `pac::Uart2`: `Output<'clk> = Uart<'clk, pac::Uart2>` — IMG_UART is
-    ///   a Dyn clock; the UART borrows `Clock` for `'clk`, blocking
-    ///   [`Clock::request_perf`] until dropped.
+    ///   a Dyn clock; the UART borrows `Clock` for `'clk`, blocking the
+    ///   `into_hp`/`into_lp` transitions until dropped.
     type Output<'clk>;
 
     /// The TX/RX GPIO pin tokens consumed by [`Uart::new`] and returned by
@@ -266,7 +268,7 @@ impl sealed::Sealed for pac::Uart1 {
         pac::Uart1::PTR
     }
 
-    fn base_hz(clock: &Clock) -> Hertz<u32> {
+    fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32> {
         clock.com().hz()
     }
 
@@ -276,8 +278,8 @@ impl sealed::Sealed for pac::Uart1 {
 }
 impl UartPeriph for pac::Uart1 {
     // COM is Dyn — Output<'clk> = Uart<'clk, _>; the returned Uart borrows the
-    // Clock for 'clk, blocking Clock::request_perf (which would change COM and
-    // invalidate the baud divisor) until dropped.
+    // Clock for 'clk, blocking the into_hp/into_lp transitions (which would
+    // change COM and invalidate the baud divisor) until dropped.
     type Output<'clk> = Uart<'clk, pac::Uart1>;
     type Pins = Uart1Pins;
     type TxPin = GpioPin<pac::topreg::GpSpi0CsX>;
@@ -312,7 +314,7 @@ impl sealed::Sealed for pac::Uart2 {
     fn regs() -> *const pac::uart1::RegisterBlock {
         pac::Uart2::PTR as *const _
     }
-    fn base_hz(clock: &Clock) -> Hertz<u32> {
+    fn base_hz<P: PerfState>(clock: &Clock<P>) -> Hertz<u32> {
         clock.img_uart().hz()
     }
 
@@ -322,7 +324,8 @@ impl sealed::Sealed for pac::Uart2 {
 }
 impl UartPeriph for pac::Uart2 {
     // IMG_UART is Dyn — Output<'clk> = Uart<'clk, _>; the returned Uart
-    // borrows the Clock for 'clk, blocking Clock::request_perf until dropped.
+    // borrows the Clock for 'clk, blocking the into_hp/into_lp transitions
+    // until dropped.
     type Output<'clk> = Uart<'clk, pac::Uart2>;
     type Pins = Uart2Pins;
     type TxPin = GpioPin<pac::topreg::GpUart2Txd>;
@@ -393,11 +396,13 @@ impl embedded_io::Error for UartError {
 /// The lifetime `'clk` is tied to the [`Clock`](crate::clocks::Clock) for both
 /// UARTs, because both base clocks track the APP operating point:
 /// - [`pac::Uart1`] — UART1 uses the dynamic COM clock (derived from the SYS
-///   tree / SYSPLL), so the UART borrows the `Clock`, preventing
-///   [`Clock::request_perf`] from changing COM and invalidating the baud
-///   divisor until dropped.
+///   tree / SYSPLL), so the UART borrows the `Clock`, preventing an
+///   operating-point change ([`Clock::into_hp`] / [`Clock::into_lp`], which
+///   need ownership of the `Clock`) from changing COM and invalidating the
+///   baud divisor until dropped.
 /// - [`pac::Uart2`] — UART2 uses the dynamic IMG_UART clock, so the UART
-///   borrows the `Clock`, preventing [`Clock::request_perf`] until dropped.
+///   borrows the `Clock`, preventing the `into_hp`/`into_lp` transitions
+///   until dropped.
 ///
 /// Use [`Uart::new`] to construct the driver — `U` is inferred from the PAC
 /// token you pass. The return type and its lifetime are determined by `U` via
@@ -432,11 +437,12 @@ impl<'clk, U: UartPeriph> Uart<'clk, U> {
     /// The return type is resolved per token via [`UartPeriph::Output`]:
     ///
     /// - `U = pac::Uart1` → [`Uart<'a, pac::Uart1>`]: COM is Dyn; the returned
-    ///   `Uart` borrows `clock` for `'a`, preventing [`Clock::request_perf`]
-    ///   (needs `&mut Clock`) from changing COM until dropped.
+    ///   `Uart` borrows `clock` for `'a`, preventing an operating-point change
+    ///   ([`Clock::into_hp`] / [`Clock::into_lp`], which need ownership of the
+    ///   `Clock`) from changing COM until dropped.
     /// - `U = pac::Uart2` → [`Uart<'a, pac::Uart2>`]: IMG_UART is Dyn; the
-    ///   returned `Uart` borrows `clock` for `'a`, preventing
-    ///   [`Clock::request_perf`] (needs `&mut Clock`) until dropped.
+    ///   returned `Uart` borrows `clock` for `'a`, preventing the
+    ///   `into_hp`/`into_lp` transitions until dropped.
     ///
     /// # Example
     /// ```ignore
@@ -445,11 +451,11 @@ impl<'clk, U: UartPeriph> Uart<'clk, U> {
     /// let uart = Uart::new(pac.uart1, pins, Default::default(), &clock)?;
     /// ```
     #[allow(clippy::new_ret_no_self)] // intentional: returns U::Output<'a> (branded by the clock-lifetime GAT)
-    pub fn new<'a>(
+    pub fn new<'a, P: PerfState>(
         uart: U,
         pins: U::Pins,
         config: UartConfig,
-        clock: &'a Clock,
+        clock: &'a Clock<P>,
     ) -> Result<U::Output<'a>, UartError> {
         let hz = U::base_hz(clock);
         U::ID.enable()?;

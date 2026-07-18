@@ -28,14 +28,15 @@ fn main() -> ! {
     // Profile-aware clock (owns the CRG). The watchdog's reload is derived from
     // the perf-dependent CPU base clock, so we need the `Clock` (not a `Clocks`
     // snapshot) to construct the watchdog.
-    let clock = pac.crg.constrain(Config::default()).into_clock();
+    let clock = pac.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
 
     let pins = pins::Parts::new(pac.topreg);
     let mut led = pins.gp_i2s1_bck.into_output(Level::Low); // LED0
     let mut delay = Delay::new(core.SYST, &clock);
 
-    // 4-second watchdog. Borrowing `clock` keeps `request_perf` locked out for
-    // the watchdog's lifetime, so the computed timeout cannot go stale.
+    // 4-second watchdog. Borrowing `clock` keeps the operating point locked
+    // (`into_hp`/`into_lp` need ownership) for the watchdog's lifetime, so the
+    // computed timeout cannot go stale.
     let mut wdt = Watchdog::new(pac.wdog, 4000u32.millis(), &clock).unwrap();
     wdt.start();
 

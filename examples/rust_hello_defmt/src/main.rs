@@ -14,7 +14,7 @@ use cxd56_hal::delay::Delay;
 use cxd56_hal::gpio::Level;
 use cxd56_hal::pac;
 use cxd56_hal::{
-    clocks::{Clock, Config, RccExt},
+    clocks::{Clock, Config, Hp, RccExt},
     gpio::pins::Parts,
     uart::{Uart, Uart1Pins},
 };
@@ -22,7 +22,7 @@ use cxd56_hal::{
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 // UART1 now borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
 // `Clock` must outlive the `'static` UART stored in `SERIAL`.
-static CLOCK: StaticCell<Clock> = StaticCell::new();
+static CLOCK: StaticCell<Clock<Hp>> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
@@ -32,7 +32,7 @@ fn main() -> ! {
     let crg = pac.crg.constrain(Config::default());
     // Promote the clock to `'static` so the UART1 console (which borrows it)
     // can be stored in the `'static` `SERIAL` cell.
-    let clock = CLOCK.init(crg.into_clock());
+    let clock = CLOCK.init(crg.into_hp_clock().expect("lock Hp"));
 
     // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
     let parts = Parts::new(pac.topreg);

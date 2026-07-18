@@ -50,8 +50,6 @@ use panic_halt as _;
 
 use embassy_time::{Duration, Instant, Timer};
 
-#[cfg(feature = "low-power")]
-use cxd56_hal::clocks::Perf;
 use cxd56_hal::clocks::{Config, RccExt};
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac::{self, interrupt};
@@ -89,14 +87,13 @@ async fn fire(slot: &Cell<u64>, after_ms: u64, start: Instant) {
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
 
-    // Boot operating point is ~97.5 MHz; `low-power` drops to the LP point first so
-    // the demo can be flashed at both (the timings below must match across the two).
-    #[allow(unused_mut)]
-    let mut clock = dp.crg.constrain(Config::default()).into_clock();
+    // Construction locks the operating point: HP by default, or the LP point with
+    // the `low-power` feature — so the demo can be flashed at both (the timings
+    // below must match across the two).
+    #[cfg(not(feature = "low-power"))]
+    let clock = dp.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
     #[cfg(feature = "low-power")]
-    clock
-        .request_perf(Perf::Lp)
-        .expect("failed to enter low-power operating point");
+    let clock = dp.crg.constrain(Config::default()).into_lp_clock().expect("lock Lp");
 
     let parts = Parts::new(dp.topreg);
     let uart1_pins = Uart1Pins {

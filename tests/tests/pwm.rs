@@ -46,7 +46,7 @@ use cxd56_hal::pac::{Interrupt, interrupt};
 static SERIAL: StaticCell<Uart<'static, pac::Uart1>> = StaticCell::new();
 // UART1 borrows the `Clock` for its lifetime (COM is a Dyn clock), so the
 // `Clock` must outlive the `'static` UART stored in `SERIAL`.
-static CLOCK: StaticCell<cxd56_hal::clocks::Clock> = StaticCell::new();
+static CLOCK: StaticCell<cxd56_hal::clocks::Clock<cxd56_hal::clocks::Hp>> = StaticCell::new();
 
 /// Forward the D22 / SEN_IRQ_IN EXDEVICE interrupt to the GPIO async runtime.
 /// SEN_IRQ_IN (pin 37) is the first SYS-domain pin mapped here → slot 0.
@@ -175,7 +175,7 @@ mod tests {
         let pac = pac::Peripherals::take().unwrap();
         // Promote the clock to `'static` so the UART1 console (which borrows it)
         // can be stored in the `'static` `SERIAL` cell.
-        let clock = crate::CLOCK.init(pac.crg.constrain(Config::default()).into_clock());
+        let clock = crate::CLOCK.init(pac.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp"));
 
         async_delay::init(clock);
 

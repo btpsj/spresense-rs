@@ -19,7 +19,7 @@ use cxd56_hal::uart::{Uart, Uart1Pins};
 #[entry]
 fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
-    let clocks = pac.crg.constrain(Config::default()).into_clock();
+    let clocks = pac.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
 
     // Build the full UART1 driver (CP2102N USB-serial bridge on the main board).
     let parts = Parts::new(pac.topreg);

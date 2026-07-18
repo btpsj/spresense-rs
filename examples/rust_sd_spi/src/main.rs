@@ -59,7 +59,7 @@ fn send_cmd<S: SpiBus<u8>>(spi: &mut S, cmd: u8, arg: u32, crc: u8, buf: &mut [u
 fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
     let crg = pac.crg.constrain(Config::default());
-    let clock = crg.into_clock();
+    let clock = crg.into_hp_clock().expect("lock Hp");
 
     // UART1 for console output. COM is a Dyn clock → the UART borrows `clock`.
     let parts = Parts::new(pac.topreg);

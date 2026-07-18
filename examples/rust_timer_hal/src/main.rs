@@ -55,8 +55,9 @@ fn main() -> ! {
 
     // Profile-aware clock (owns the CRG). The timers count at the
     // perf-dependent CPU base clock, so constructing them borrows `clock`,
-    // locking out `request_perf` for their lifetime.
-    let clock = dp.crg.constrain(Config::default()).into_clock();
+    // keeping the operating point locked (`into_hp`/`into_lp` need
+    // ownership) for their lifetime.
+    let clock = dp.crg.constrain(Config::default()).into_hp_clock().expect("lock Hp");
 
     // UART1 console
     let parts = Parts::new(dp.topreg);
