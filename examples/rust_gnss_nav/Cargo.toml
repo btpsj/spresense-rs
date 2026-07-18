@@ -1,0 +1,39 @@
+[package]
+name = "rust_gnss_nav"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+cxd56-hal = { path = "../../cxd56-hal", features = ["rt", "critical-section"] }
+defmt = "1.1.0"
+defmt-serial = "0.13"
+# Bounded, alloc-free string assembly for the NMEA sentences.
+heapless = "0.8"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+static_cell = "2.1.1"
+
+# --- external GNSS crates under evaluation (documentation/gnss-crate-evaluation.md) ---
+# NMEA parser (there is no no_std generator crate; generation stays hand-rolled
+# and this parser round-trip-validates it on target). Per-sentence features.
+# The optional `defmt` feature must stay OFF: it pulls defmt 0.3 next to our
+# defmt 1.1 and the two fight over the linker sections.
+nmea = { version = "0.7", default-features = false, features = ["GGA", "RMC"] }
+# nmea's date/time types (same ^0.4 requirement, so one shared copy) — used to
+# rebuild the expected values for the round-trip comparison.
+chrono = { version = "0.4", default-features = false }
+# fabs/fabsf for the tolerance checks — core has no float math.
+libm = "0.2"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = 2
+panic = "abort"
