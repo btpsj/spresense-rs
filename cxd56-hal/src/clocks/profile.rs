@@ -229,6 +229,41 @@ impl Clock {
         Hertz::<u32>::Hz(super::buses::cpu_baseclk_hz(self.appsmp.hz().to_Hz()))
     }
 
+    /// Classify the **live** clock tree by its operating-point signature: a
+    /// fresh register sample (not the cached fields), mapped by the SYSPLL
+    /// setting and the APP base clock. Signatures measured on CXD5602:
+    ///
+    /// | tree                | SYSPLL  | `appsmp` | result           |
+    /// |---------------------|---------|----------|------------------|
+    /// | FREQLOCK HV         | 156 MHz | 156 MHz  | `Some(Perf::Hp)` |
+    /// | FREQLOCK LV         | 156 MHz | 31.2 MHz | `Some(Perf::Lp)` |
+    /// | cold-boot (no lock) | 195 MHz | 97.5 MHz | `None`           |
+    ///
+    /// Wide bands (> 100 MHz / < 50 MHz) rather than exact taps, mirroring
+    /// the tolerance `clock_perf` applies on hardware; `None` means "not a
+    /// lockable operating point" — the unconstrained boot tree or an unknown
+    /// state.
+    ///
+    /// This reads the *clock* half of the operating point only (the silicon
+    /// has no voltage-mode readback register; the core rail lives behind a
+    /// PMIC RPC), and it proves what the tree **is**, not that a `FREQLOCK`
+    /// is *held*: a warm APP reboot inherits the previous operating point
+    /// with no lock in force — the SYSIOP survives the reset.
+    pub fn sampled_perf(&self) -> Option<Perf> {
+        let c = Clocks::sample(self.crg.cfg);
+        if c.syspll.to_Hz() != 156_000_000 {
+            return None;
+        }
+        let appsmp = c.appsmp.to_Hz();
+        if appsmp > 100_000_000 {
+            Some(Perf::Hp)
+        } else if appsmp < 50_000_000 {
+            Some(Perf::Lp)
+        } else {
+            None
+        }
+    }
+
     pub fn usb(&self) -> &Dyn {
         &self.usb
     }
