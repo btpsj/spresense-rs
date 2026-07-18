@@ -1,18 +1,20 @@
-//! External-crate GNSS demo: round-trips our hand-assembled NMEA sentences
-//! through the `nmea` crate parser, on target, against the live receiver.
+//! External-crate GNSS demo: exercises the two crates.io no_std GNSS
+//! libraries that survived the crate survey (see
+//! `documentation/gnss-crate-evaluation.md`) against the live receiver.
 //!
-//! No no_std NMEA *generator* exists on crates.io (every candidate crate is a
-//! parser), so sentence generation stays hand-rolled — duplicated from
-//! `rust_gnss`, whose emission this example validates: each epoch's
-//! `$GPGGA`/`$GPRMC` is parsed straight back by an independent implementation
-//! and the decoded fields are compared against the source [`PositionData`].
-//! See `documentation/gnss-crate-evaluation.md` for the crate survey behind
-//! the dependency choices.
+//! 1. **`nmea` (parser)** — every epoch's hand-assembled `$GPGGA`/`$GPRMC`
+//!    is parsed straight back on target and the decoded fields are compared
+//!    against the source [`PositionData`]: an independent round-trip
+//!    validation of our generator. (Generation itself stays hand-rolled —
+//!    no no_std NMEA *generator* exists on crates.io.)
+//! 2. **`sguaba` (coordinates)** — the first valid fix becomes the origin of
+//!    a local ENU frame; every later fix is converted WGS84 → ECEF → ENU and
+//!    reported as east/north/up metres plus horizontal distance and bearing.
 //!
 //! Indoors the receiver never fixes; after [`DEMO_AFTER_FIXLESS_EPOCHS`]
-//! fixless epochs the example runs one round-trip pass on canned positions so
-//! a desk run still exercises the whole pipeline, then keeps waiting for a
-//! real fix.
+//! fixless epochs the example runs one pass on canned positions (~8.9 km
+//! apart in Tokyo) so a desk run still exercises both crates, then keeps
+//! waiting for a real fix.
 
 #![no_std]
 #![no_main]
@@ -28,7 +30,15 @@ use nmea::sentences::rmc::RmcStatusOfFix;
 use nmea::sentences::{FixType, GgaData, RmcData};
 use nmea::{parse_str, ParseResult};
 use panic_probe as _;
+use sguaba::{
+    math::RigidBodyTransform,
+    systems::{Ecef, Wgs84},
+    Coordinate,
+};
 use static_cell::StaticCell;
+use uom::si::angle::degree;
+use uom::si::f64::{Angle, Length};
+use uom::si::length::meter;
 
 use cxd56_hal::gnss::{
     Date, Gnss, GnssError, OperationMode, PositionData, SatelliteSystems, StartMode, Time,
@@ -56,6 +66,40 @@ const DEMO_AFTER_FIXLESS_EPOCHS: u32 = 15;
 /// fields (altitude, HDOP, knots, course) in 0.1 steps.
 const TOL_DEG: f64 = 5e-6;
 const TOL_TENTH: f32 = 0.06;
+
+// One marker type per claimed origin: the `unsafe` in `ecef_to_enu_at`
+// asserts "this type's origin is at this WGS84 point", so the live
+// reference and the desk demo must not share a type.
+sguaba::system!(struct LocalEnu using ENU);
+sguaba::system!(struct DemoEnu using ENU);
+
+/// Convert a target position into `$frame` (whose origin `$t` claims) and
+/// report east/north/up plus horizontal distance and bearing. A macro so both
+/// frames share it without naming sguaba's internal trait bounds.
+macro_rules! report_enu {
+    ($t:expr, $target:expr, $frame:ty) => {{
+        let local: Coordinate<$frame> = $t.transform(Coordinate::<Ecef>::from_wgs84($target));
+        let e = local.enu_east().get::<meter>();
+        let n = local.enu_north().get::<meter>();
+        let u = local.enu_up().get::<meter>();
+        // `None` exactly at the origin (the reference fix itself).
+        let az = local
+            .bearing_from_origin()
+            .map(|b| {
+                let a = b.azimuth().get::<degree>();
+                if a < 0.0 { a + 360.0 } else { a }
+            })
+            .unwrap_or(0.0);
+        info!(
+            "nav: E={=f64} m N={=f64} m U={=f64} m | horiz={=f64} m bearing={=f64} deg",
+            e,
+            n,
+            u,
+            libm::hypot(e, n),
+            az,
+        );
+    }};
+}
 
 #[entry]
 fn main() -> ! {
@@ -98,6 +142,7 @@ fn main() -> ! {
     info!("positioning started; expect a first cold-sky fix in 35-120 s");
 
     let pos = POS.init(PositionData::zeroed());
+    let mut nav: Option<RigidBodyTransform<Ecef, LocalEnu>> = None;
     let mut fixless_epochs: u32 = 0;
     let mut demo_done = false;
     loop {
@@ -115,6 +160,19 @@ fn main() -> ! {
             fixless_epochs = 0;
             report_fix(pos);
             nmea_roundtrip(pos);
+            let here = wgs(rx.latitude, rx.longitude, rx.altitude);
+            if nav.is_none() {
+                info!(
+                    "nav reference set: lat={=f64} lon={=f64} alt={=f64} m",
+                    rx.latitude, rx.longitude, rx.altitude,
+                );
+                // SAFETY: LocalEnu's origin is defined by this very call —
+                // the first valid fix of this run. Constructed exactly once.
+                nav = Some(unsafe { RigidBodyTransform::ecef_to_enu_at(&here) });
+            }
+            if let Some(t) = &nav {
+                report_enu!(t, &here, LocalEnu);
+            }
         } else {
             info!(
                 "no fix yet: visible={=u8} tracking={=u8}",
@@ -146,8 +204,8 @@ fn report_fix(pos: &PositionData) {
     );
 }
 
-/// One canned pass so a desk run (no sky view) still exercises the whole
-/// pipeline, then the main loop goes back to waiting for a real fix.
+/// One canned pass so a desk run (no sky view) still exercises both crates,
+/// then the main loop goes back to waiting for a real fix.
 fn desk_demo(pos: &mut PositionData) {
     info!(
         "=== no fix after {=u32} epochs - desk demo on canned positions ===",
@@ -155,9 +213,30 @@ fn desk_demo(pos: &mut PositionData) {
     );
     set_canned(pos, DEMO_A);
     nmea_roundtrip(pos);
+    let a = wgs(DEMO_A.0, DEMO_A.1, DEMO_A.2);
+    // SAFETY: DemoEnu's origin is defined here as DEMO_A and the type is
+    // used for nothing else (LocalEnu keeps the live-fix origin).
+    let t = unsafe { RigidBodyTransform::ecef_to_enu_at(&a) };
     set_canned(pos, DEMO_B);
     nmea_roundtrip(pos);
+    let b = wgs(DEMO_B.0, DEMO_B.1, DEMO_B.2);
+    // Expect roughly E=-8.4 km N=+3.1 km, ~8.9 km horizontal @ ~291 deg.
+    report_enu!(&t, &b, DemoEnu);
+    info!(
+        "cross-check: haversine surface distance {=f64} m",
+        a.haversine_distance_on_surface(&b).get::<meter>(),
+    );
     info!("=== desk demo done; still waiting for a real fix ===");
+}
+
+/// Build a sguaba WGS84 coordinate from firmware degrees/metres.
+fn wgs(lat_deg: f64, lon_deg: f64, alt_m: f64) -> Wgs84 {
+    Wgs84::builder()
+        .latitude(Angle::new::<degree>(lat_deg))
+        .expect("latitude in [-90, 90]")
+        .longitude(Angle::new::<degree>(lon_deg))
+        .altitude(Length::new::<meter>(alt_m))
+        .build()
 }
 
 /// Poke a synthetic fix into the epoch buffer (it is overwritten by the next

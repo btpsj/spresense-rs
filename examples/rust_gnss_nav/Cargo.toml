@@ -25,7 +25,15 @@ nmea = { version = "0.7", default-features = false, features = ["GGA", "RMC"] }
 # nmea's date/time types (same ^0.4 requirement, so one shared copy) — used to
 # rebuild the expected values for the round-trip comparison.
 chrono = { version = "0.4", default-features = false }
-# fabs/fabsf for the tolerance checks — core has no float math.
+# WGS84/ECEF/ENU coordinates and rigid-body transforms.
+# default-features = false is mandatory (the defaults include std);
+# `libm` routes nalgebra's math through libm for no_std.
+sguaba = { version = "0.10", default-features = false, features = ["libm"] }
+# sguaba does not re-export uom; direct dep to name Angle/Length. Stays
+# semver-unified with sguaba's own `uom = "0.38"` requirement.
+uom = { version = "0.38", default-features = false, features = ["autoconvert", "si", "f64"] }
+# fabs/fabsf for the tolerance checks, hypot for the ENU horizontal
+# distance — core has no float math.
 libm = "0.2"
 
 [profile.dev]
