@@ -106,7 +106,7 @@ fn main() -> ! {
         Some(i) if buf[i] == 0x01 => {
             let voltage = buf.get(i + 3).copied().unwrap_or(0) & 0x0F;
             let echo = buf.get(i + 4).copied().unwrap_or(0);
-            writeln!(uart, "CMD8  SEND_IF_COND   -> R7 voltage={:#03x} echo={:#04x}", voltage, echo).ok();
+            writeln!(uart, "CMD8  SEND_IF_COND   -> R7 voltage={:#x} echo={:#04x}", voltage, echo).ok();
             echo == 0xAA && voltage == 0x1
         }
         Some(i) => {
