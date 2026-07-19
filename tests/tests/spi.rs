@@ -50,7 +50,7 @@ mod tests {
     use cxd56_hal::uart::{Uart, Uart1Pins};
 
     struct State {
-        clock: &'static cxd56_hal::clocks::Clock,
+        clock: &'static cxd56_hal::clocks::Clock<cxd56_hal::clocks::Hp>,
     }
 
     #[init]
