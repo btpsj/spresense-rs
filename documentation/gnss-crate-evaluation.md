@@ -8,7 +8,8 @@
 hand-rolled GNSS code in this repo, and can they be integrated in an example?
 
 **Answer**: nothing hand-rolled is replaceable — but two crates are genuinely
-usable and are now integrated in `examples/rust_gnss_nav`: **`nmea`** (as an
+usable and are now integrated in the `rust_gnss_nav` example
+(`examples/gnss/src/bin/rust_gnss_nav.rs`): **`nmea`** (as an
 on-target validator of our NMEA generator) and **`sguaba`** (local-frame
 coordinate math, a capability the repo did not have). The other three named
 crates **do not compile for this target as published**, each for the same
@@ -22,7 +23,7 @@ in `std`.
   `cxd56_gnss_positiondata_s`) plus the Far-API/ICC transport. **Categorically
   not replaceable**: no crates.io library speaks Sony's `gnssfw` protocol, and
   the structs are dictated byte-for-byte by the firmware.
-- `examples/rust_gnss/src/main.rs` — the *only* generic GNSS processing in the
+- `examples/gnss/src/bin/rust_gnss.rs` — the *only* generic GNSS processing in the
   repo (~70 lines): `$GPGGA`/`$GPRMC` generation via `core::fmt::Write`, XOR
   checksum, degrees→degree/decimal-minute split, m/s→knots factor, and a
   constellation-bit→name match. The firmware already delivers geodetic
@@ -91,7 +92,7 @@ Notes per crate:
   default-features off — nothing here needs it: the firmware hands us UTC
   fields directly), `map_3d` (geodetic conversions, std-oriented).
 
-## 3. Integration outcome (`examples/rust_gnss_nav`)
+## 3. Integration outcome (the `rust_gnss_nav` example)
 
 - **nmea round-trip**: each epoch's generated `$GPGGA`/`$GPRMC` is parsed
   back by `nmea::parse_str` and every decoded field is compared against the
