@@ -53,7 +53,7 @@ So examples are grouped into members by link-level configuration:
 | `rust_burn_sine` | rust_burn_sine | burn (ONNX model codegen at build time) on cxd56-hal |
 | `gnss` | rust_gnss, rust_gnss_nav | cxd56-hal + the crates.io nmea/sguaba stack (must not meet rust_burn_sine) |
 | `async-delay` | rust_gpio_wait, rust_gpio_wait_lp, rust_sleep | cxd56-hal `async-delay-*` (selectable, see below) |
-| `critical-section` | rust_critical_section | SPH-based critical_section impl (no single-core impl) |
+| `critical-section` | rust_critical_section, rust_multicore_mailbox | SPH-based critical_section impl (no single-core impl) |
 | `embassy-pac` | rust_blink_embassy, rust_hello_uart_embassy | embassy-cxd56 (chiptool PAC) |
 | `pac-chiptool` | rust_blink_chiptool | chiptool PAC direct, no HAL |
 
@@ -225,3 +225,23 @@ rust_gnss_nav`; same firmware/antenna requirements and benign link warning
 as `rust_gnss`. All f64 math is soft-float (the M4F FPU is f32-only) —
 microseconds per 1 Hz epoch, and +66.7 KiB of flash text over `rust_gnss`
 for the two crates combined (measured in the evaluation doc).
+
+### rust_multicore_mailbox
+
+`Core0` spawns `Core1` streaming a typed proto-14 `Message` every ~100 ms,
+then drives two futures **concurrently** with the same in-file `WFE`
+`block_on`/`join` as `rust_embassy_time`: an async `inbox.recv()` loop
+printing each mailbox tick, and an `embassy_time::Timer` ticker on the HAL's
+RTC time driver — two interrupts (`FIFO_FROM`, `RTC0_A0`) waking one
+executor-less core. After the demo stops receiving, `Core1` keeps sending
+until the 8-deep inbox ring and then the hardware FIFO fill and its
+`try_send` is held off forever — that quiet stop *is* the end-to-end
+back-pressure working. Lives in the `critical-section` member (its SPH
+`critical-section-impl` must not meet cortex-m's single-core impl):
+
+```bash
+cargo run --release -p examples-critical-section --bin rust_multicore_mailbox
+```
+
+Plain-text output at 115 200 baud (no defmt) — the runner's monitor shows
+it directly.
