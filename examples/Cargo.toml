@@ -3,7 +3,10 @@
 # [workspace.dependencies]. Members group examples by link-level
 # configuration — cxd56-hal demands exactly one async-time backend per build,
 # the three PACs (svd2rust, chiptool, embassy-cxd56) must not share a package,
-# and the SPH critical-section impl must not meet cortex-m's single-core impl.
+# the SPH critical-section impl must not meet cortex-m's single-core impl,
+# and rust_burn_sine must not meet the GNSS bins (burn's store stack flips
+# the memchr that nmea -> nom links there to std+alloc, which would demand a
+# global allocator in allocator-less bins).
 #
 # Cargo unifies dependency features across every package it selects, so
 # default-members below names the largest mutually-compatible set: those
@@ -15,6 +18,7 @@
 resolver = "3"
 members = [
     "hal",
+    "gnss",
     "async-delay",
     "embassy-time",
     "critical-section",
@@ -31,6 +35,7 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+chrono = { version = "0.4", default-features = false } # nmea's date/time types
 cortex-m = "0.7.7" # members opt into critical-section-single-core themselves
 cortex-m-rt = "0.7.5"
 critical-section = "1.2.0"
@@ -45,11 +50,23 @@ embassy-time = { version = "0.5.1", default-features = false, features = ["gener
 embedded-hal = "1.0.0"
 embedded-io = "0.7"
 fugit = "0.3"
+heapless = "0.8"
+libm = "0.2"
 lis2mdl-rs = { version = "2.0.0", default-features = false, features = ["blocking"] }
+# NMEA parser (parse-only; generation stays hand-rolled). Its optional `defmt`
+# feature must stay OFF: it pins defmt 0.3 next to our defmt 1.1. See
+# ../documentation/gnss-crate-evaluation.md for the full survey.
+nmea = { version = "0.7", default-features = false, features = ["GGA", "RMC"] }
 panic-halt = "1.0.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+# WGS84/ECEF/ENU coordinate math; default-features = false is mandatory (the
+# defaults include std), `libm` routes nalgebra's math through libm.
+sguaba = { version = "0.10", default-features = false, features = ["libm"] }
 spresense-bsp = { version = "0.1.0", path = "../spresense-bsp" }
 static_cell = "2.1.1"
+# sguaba does not re-export uom; direct dep to name Angle/Length, kept
+# semver-unified with sguaba's own `uom = "0.38"` requirement.
+uom = { version = "0.38", default-features = false, features = ["autoconvert", "si", "f64"] }
 vcell = "0.1.3"
 
 [profile.dev]

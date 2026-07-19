@@ -81,8 +81,9 @@ jobs:
   # group: cargo unifies dependency features across the packages it selects,
   # and cxd56-hal allows exactly one async-time backend per build, the
   # chiptool-PAC members must not see cortex-m-rt's `device` feature (flipped
-  # on by the svd2rust PAC's `rt`), and the SPH critical-section impl must not
-  # meet cortex-m's single-core impl — so `--workspace` cannot work.
+  # on by the svd2rust PAC's `rt`), the SPH critical-section impl must not
+  # meet cortex-m's single-core impl, and rust_burn_sine flips the GNSS bins'
+  # memchr to std+alloc — so `--workspace` cannot work.
   examples:
     name: Examples (build + clippy)
     runs-on: ubuntu-latest
@@ -97,7 +98,7 @@ jobs:
         working-directory: examples
         run: |
           set -e
-          cargo build --release -p examples-hal -p examples-embassy-time -p examples-pac-svd2rust
+          cargo build --release -p examples-hal -p examples-embassy-time -p examples-pac-svd2rust -p examples-gnss
           cargo build --release -p examples-embassy-pac -p examples-pac-chiptool
           cargo build --release -p examples-async-delay
           cargo build --release -p examples-async-delay --no-default-features --features backing-timer
@@ -109,7 +110,7 @@ jobs:
         working-directory: examples
         run: |
           set -e
-          cargo clippy --release -p examples-hal -p examples-embassy-time -p examples-pac-svd2rust -- -D warnings
+          cargo clippy --release -p examples-hal -p examples-embassy-time -p examples-pac-svd2rust -p examples-gnss -- -D warnings
           cargo clippy --release -p examples-embassy-pac -p examples-pac-chiptool -- -D warnings
           cargo clippy --release -p examples-async-delay -- -D warnings
           cargo clippy --release -p examples-async-delay --no-default-features --features backing-timer -- -D warnings

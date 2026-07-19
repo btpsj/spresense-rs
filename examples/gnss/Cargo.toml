@@ -1,0 +1,26 @@
+# The onboard-GNSS examples. Same HAL configuration as `hal`, but a separate
+# member because these bins must never be co-selected with rust_burn_sine:
+# burn's store stack enables `memchr/std` (and so alloc) on the same memchr
+# that nmea -> nom links into rust_gnss_nav, and an alloc-enabled memchr
+# demands a global allocator these bins do not have. Each src/bin/*.rs is one
+# example; cargo infers the bin targets.
+[package]
+name = "examples-gnss"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+cortex-m = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt.workspace = true
+cxd56-hal = { workspace = true, features = ["time-driver-rtc"] }
+defmt.workspace = true
+defmt-serial.workspace = true
+heapless.workspace = true
+libm.workspace = true
+nmea.workspace = true
+panic-probe.workspace = true
+sguaba.workspace = true
+static_cell.workspace = true
+uom.workspace = true
