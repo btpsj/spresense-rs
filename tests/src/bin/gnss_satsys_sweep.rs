@@ -30,6 +30,11 @@
 //! Requires Sony's standard firmware set in SPI flash (`gnssfw`); a board
 //! without it fails at boot with `Firmware(-2)`.
 //!
+//! What it found on gnssfw 2.2.20596 (2026-07-23): 128 of the 256 masks
+//! accepted, 128 rejected `-22`/`EINVAL`, no coercions, both passes agreeing —
+//! all explained by one rule, *GLONASS, BeiDou and Galileo are mutually
+//! exclusive*. See `tests/README.md` for the full matrix.
+//!
 //! Run: `cargo run --release --bin gnss_satsys_sweep` (from tests/).
 
 #![no_std]

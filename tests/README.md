@@ -196,6 +196,37 @@ baseline was restored — so the table can be believed; `FAIL` means it cannot.
 The sweep restores `GPS|GLONASS` before shutting down, because pass 2 ends on
 `SAT_NONE` and the firmware keeps its configuration in Backup SRAM across boots.
 
+#### Measured result — gnssfw 2.2.20596, 2026-07-23
+
+Exactly **128 of the 256 masks accepted, 128 rejected**, every rejection
+`Firmware(-22)` (`EINVAL`), zero coercions, and the two passes agreed on every
+mask. One rule accounts for all of it:
+
+> **GLONASS, BeiDou and Galileo are mutually exclusive — at most one of the
+> three may be selected at a time.** GPS, SBAS, QZSS L1CA, IMES and QZSS L1S
+> are unrestricted and combine with anything.
+
+The sweep's minimal-rejected list is precisely those three pairs — `GLONASS|BeiDou`
+(`0x42`), `GLONASS|Galileo` (`0x82`), `BeiDou|Galileo` (`0xc0`) — and no other
+minimal rejection exists, so every one of the 128 refusals is a mask containing
+at least one of them. The arithmetic closes: 4 legal choices for the exclusive
+group (none, or one of three) x 32 free combinations of the other five bits =
+128. The three **maximal** usable sets are therefore:
+
+| Mask | Systems |
+| ---- | ------- |
+| `0x3f` | GPS + GLONASS + SBAS + QZSS L1CA + IMES + QZSS L1S |
+| `0x7d` | GPS + SBAS + QZSS L1CA + IMES + QZSS L1S + BeiDou |
+| `0xbd` | GPS + SBAS + QZSS L1CA + IMES + QZSS L1S + Galileo |
+
+Each of the eight systems **alone** is accepted, BeiDou and Galileo included.
+
+The out-of-range probe shows the firmware does **not** range-check: `1<<8`,
+`1<<15` and `1<<31` are all accepted and read back verbatim (unknown bits are
+stored, not masked off). `0xffff_ffff` is rejected only because it sets all
+three exclusive bits at once. So `EINVAL` here always means "illegal
+constellation combination", never "bit out of range".
+
 ### `time` — embassy time driver (defmt-test)
 
 Validates the HAL's `embassy_time_driver::Driver` against an **independent
