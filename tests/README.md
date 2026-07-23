@@ -65,6 +65,7 @@ Run everything from `tests/`:
 | ↳ external loopback | | `… --features external-loopback` | JP1 D01↔D00 |
 | `clock_perf` | bin | `cargo run --release --bin clock_perf` | none |
 | `gnss_smoke` | bin | `cargo run --release --bin gnss_smoke` | none (gnssfw in flash) |
+| `gnss_satsys_sweep` | bin (diagnostic) | `cargo run --release --bin gnss_satsys_sweep` | none (gnssfw in flash) |
 | `clock_dump` | bin (diagnostic) | `cargo run --release --bin clock_dump` | none |
 | `time` | defmt-test | `cargo test --release --test time` | none |
 | ↳ SP804 backing | | `… --no-default-features --features time-timer` | none |
@@ -151,6 +152,49 @@ firmware set in SPI flash (`gnssfw`); a board without it fails step [1] with
 - `[5] epochs`    — cold start, two 1 s epoch notifications, `read_position`,
   stop. Indoors the fix stays invalid; only the mechanics are asserted.
 - `[6] shutdown`  — GPS CPU back to cold sleep.
+
+### `gnss_satsys_sweep` — satellite-system combinations (plain `defmt`, bin)
+
+Desk-runnable companion diagnostic (not a pass/fail test of the *firmware*):
+`SatelliteSystems` is an 8-bit mask, so 256 values can reach
+`fw_gd_selectsatellitesystem`, and some come back `Firmware(n)`. Nothing in the
+source tree says which — NuttX forwards the mask unvalidated
+(`cxd56_gnss.c:513`), Sony's headers only enumerate the bits, and any rule lives
+inside the closed `gnssfw` image — so the sweep asks the firmware directly.
+
+Every mask gets `select_systems` + a `systems()` read-back, all in one firmware
+boot (no `start`, so the post-`BOOTCOMP` settle never applies). The read-back is
+half the measurement: a firmware that accepts a mask and then reports a
+*different* one has refused it silently.
+
+Three things make the resulting table trustworthy rather than merely plausible:
+
+- **Two passes**, ascending then descending. Each probe leaves the firmware
+  holding the mask it just set, so a verdict could depend on its predecessor;
+  reversing the order changes every predecessor, and any divergence is proof
+  that the table is not a per-combination truth.
+- **A baseline canary** after each rejection — re-select `GPS|GLONASS` and read
+  it back. This stack has form for sticky refusals (the `-60` START refusal in
+  `cxd56-hal/src/gnss/mod.rs`); one poisoning mask would otherwise corrupt every
+  row after it. A failed canary re-boots `gnssfw` and the sweep continues.
+- **An out-of-range bit probe** (`1<<8`, `1<<31`, `0xffff_ffff`, …). If the
+  firmware swallows those it is not range-checking at all, which means every
+  rejection observed is a genuine *constellation* rule, not a bounds test.
+
+Output: a 16×16 acceptance grid (row = high nibble, column = low nibble; `.`
+accepted, `~` coerced, `E` rejected), then the analysis that turns 256 verdicts
+into the rule behind them — the eight single-system outcomes, which of the 28
+two-system pairs are rejected, the **minimal rejected** masks (rejected, but
+every one-bit-smaller subset accepted) and the **maximal accepted** masks
+(accepted, but rejected once any further bit is added — the largest usable
+constellation sets). Masks print as `GRSQILBE` glyph strings:
+GPS / GLONASS / SBAS / QZSS-L1CA / IMES / QZSS-L1S / BeiDou / Galileo.
+
+**Rejections are data, never a failure.** `TEST RESULT: PASS` means the
+instrument was sound — boot succeeded, both passes completed and agreed, and the
+baseline was restored — so the table can be believed; `FAIL` means it cannot.
+The sweep restores `GPS|GLONASS` before shutting down, because pass 2 ends on
+`SAT_NONE` and the firmware keeps its configuration in Backup SRAM across boots.
 
 ### `time` — embassy time driver (defmt-test)
 

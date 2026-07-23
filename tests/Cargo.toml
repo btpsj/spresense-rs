@@ -27,6 +27,10 @@ required-features = ["hal"]
 name = "gnss_smoke"
 required-features = ["hal"]
 
+[[bin]]
+name = "gnss_satsys_sweep"
+required-features = ["hal"]
+
 # defmt-test integration tests (cargo test --release --test <name>). NEVER bare
 # `cargo test`: lib/bin unit-test targets need libtest, absent on no_std.
 [[test]]
