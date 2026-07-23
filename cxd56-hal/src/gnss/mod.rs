@@ -55,7 +55,7 @@
 //!
 //! ```ignore
 //! let mut gnss = Gnss::boot(clock)?;              // clock: &Clock<Hp>
-//! gnss.select_systems(SatelliteSystems::GPS | SatelliteSystems::GLONASS)?;
+//! gnss.select_systems(SatelliteSystems::new(GpsFamily::GPS, Secondary::Glonass))?;
 //! let mut gnss = gnss.start(StartMode::Hot).map_err(|(_, e)| e)?;
 //! let mut pos = PositionData::zeroed();
 //! loop {
@@ -67,8 +67,8 @@
 pub mod types;
 
 pub use types::{
-    Date, Dop, MAX_SV_NUM, OperationMode, PositionData, Receiver, SatelliteSystems, StartMode,
-    Sv, SvPos, SvVel, Time, Var,
+    Date, Dop, GpsFamily, MAX_SV_NUM, OperationMode, PositionData, Receiver, SatelliteSystems,
+    Secondary, StartMode, Sv, SvPos, SvVel, Time, Var,
 };
 
 use core::cell::UnsafeCell;
@@ -652,6 +652,13 @@ impl<'clk> Gnss<'clk, Idle> {
     }
 
     /// Select the satellite systems used for positioning.
+    ///
+    /// A thin pass-through to `fw_gd_selectsatellitesystem`; the legal
+    /// combinations are encoded in [`SatelliteSystems::new`], so a mask built
+    /// that way is always accepted. A mask built with
+    /// [`SatelliteSystems::from_bits`] is not checked here and can still come
+    /// back [`GnssError::Firmware`]`(-22)` — see [`Secondary`] for the rule and
+    /// the hardware measurement behind it.
     pub fn select_systems(&mut self, systems: SatelliteSystems) -> Result<(), GnssError> {
         let mut arg = [systems.bits(), 0, 0, 0];
         fw_result(self.gd_rpc(API_GD_SELECTSATELLITESYSTEM, &mut arg)).map(|_| ())

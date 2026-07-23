@@ -48,7 +48,7 @@ use panic_probe as _;
 use static_cell::StaticCell;
 
 use cxd56_hal::clocks::{Clock, Config, Hp, RccExt};
-use cxd56_hal::gnss::{Gnss, GnssError, Idle, SatelliteSystems};
+use cxd56_hal::gnss::{Gnss, GnssError, GpsFamily, Idle, SatelliteSystems, Secondary};
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac;
 use cxd56_hal::uart::{Uart, Uart1Pins};
@@ -63,7 +63,7 @@ const MASKS: usize = 256;
 
 /// Known-good mask for the canary and the final restore: the pair `gnss_smoke`
 /// and `rust_gnss` have always used on this hardware.
-const BASELINE: SatelliteSystems = SatelliteSystems::GPS.union(SatelliteSystems::GLONASS);
+const BASELINE: SatelliteSystems = SatelliteSystems::new(GpsFamily::GPS, Secondary::Glonass);
 
 /// One glyph per bit, in bit order — GPS, GLONASS (RINEX `R`), SBAS, QZSS L1CA,
 /// IMES, QZSS L1S, BeiDou, Galileo (RINEX `E`).

@@ -145,7 +145,7 @@ firmware set in SPI flash (`gnssfw`); a board without it fails step [1] with
 - `[1] boot`      — SYSIOP loads `gnssfw`, GPS CPU boots, the driver answers
   the firmware's backup-restore requests, BOOTCOMP arrives.
 - `[2] version`   — `gnssfw` version word from Backup SRAM (logged only).
-- `[3] systems`   — `select_systems(GPS|GLONASS)` / `systems()` round-trip:
+- `[3] systems`   — `select_systems(GPS + GLONASS)` / `systems()` round-trip:
   a full RPC in/out through the GNSS CPU, the proof the Far API routing
   (modid 8 / cpu 1) is right.
 - `[4] operation` — `set_operation(Normal, 1000)` / `operation()` round-trip.
@@ -226,6 +226,15 @@ The out-of-range probe shows the firmware does **not** range-check: `1<<8`,
 stored, not masked off). `0xffff_ffff` is rejected only because it sets all
 three exclusive bits at once. So `EINVAL` here always means "illegal
 constellation combination", never "bit out of range".
+
+**The HAL now encodes this rule in the type.** `SatelliteSystems::new` takes a
+freely-combinable `GpsFamily` subset plus at most one `Secondary`
+(`None`/`Glonass`/`BeiDou`/`Galileo`), and `SatelliteSystems` has no `BitOr`, so
+no sequence of safe calls can name two mutually exclusive constellations —
+`Secondary::Glonass | Secondary::BeiDou` is an E0369, not a runtime `EINVAL`.
+This sweep deliberately keeps using the raw `SatelliteSystems::from_bits`
+hatch: it must be able to build illegal masks, or it would be measuring the HAL
+instead of the firmware.
 
 ### `time` — embassy time driver (defmt-test)
 

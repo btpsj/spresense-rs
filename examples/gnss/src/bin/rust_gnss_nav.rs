@@ -41,7 +41,8 @@ use uom::si::f64::{Angle, Length};
 use uom::si::length::meter;
 
 use cxd56_hal::gnss::{
-    Date, Gnss, GnssError, OperationMode, PositionData, SatelliteSystems, StartMode, Time,
+    Date, Gnss, GnssError, GpsFamily, OperationMode, PositionData, SatelliteSystems, Secondary,
+    StartMode, Time,
 };
 use cxd56_hal::pac;
 use cxd56_hal::{
@@ -128,7 +129,7 @@ fn main() -> ! {
     let (major, minor, build) = gnss.firmware_version();
     info!("gnssfw version {}.{}.{}", major, minor, build);
 
-    gnss.select_systems(SatelliteSystems::GPS | SatelliteSystems::GLONASS)
+    gnss.select_systems(SatelliteSystems::new(GpsFamily::GPS, Secondary::Glonass))
         .expect("select satellite systems");
     gnss.set_operation(OperationMode::Normal, 1000)
         .expect("set positioning cycle");

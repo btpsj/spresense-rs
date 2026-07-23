@@ -34,7 +34,7 @@ use static_cell::StaticCell;
 
 use cxd56_hal::clocks::{Clock, Config, Hp, RccExt};
 use cxd56_hal::gnss::{
-    Gnss, GnssError, OperationMode, PositionData, SatelliteSystems, StartMode,
+    Gnss, GnssError, GpsFamily, OperationMode, PositionData, SatelliteSystems, Secondary, StartMode,
 };
 use cxd56_hal::gpio::pins::Parts;
 use cxd56_hal::pac;
@@ -97,7 +97,7 @@ fn main() -> ! {
     defmt::println!("[2] gnssfw version {=u8}.{=u8}.{=u32}", major, minor, build);
 
     // [3] satellite-system round-trip through the GNSS CPU.
-    let want = SatelliteSystems::GPS | SatelliteSystems::GLONASS;
+    let want = SatelliteSystems::new(GpsFamily::GPS, Secondary::Glonass);
     let sys_ok = match gnss.select_systems(want).and_then(|()| gnss.systems()) {
         Ok(got) => got == want,
         Err(e) => {

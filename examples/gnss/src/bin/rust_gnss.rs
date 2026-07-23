@@ -17,7 +17,7 @@ use panic_probe as _;
 use static_cell::StaticCell;
 
 use cxd56_hal::gnss::{
-    Gnss, GnssError, OperationMode, PositionData, SatelliteSystems, StartMode,
+    Gnss, GnssError, GpsFamily, OperationMode, PositionData, SatelliteSystems, Secondary, StartMode,
 };
 use cxd56_hal::pac;
 use cxd56_hal::{
@@ -58,7 +58,7 @@ fn main() -> ! {
     let (major, minor, build) = gnss.firmware_version();
     info!("gnssfw version {}.{}.{}", major, minor, build);
 
-    gnss.select_systems(SatelliteSystems::GPS | SatelliteSystems::GLONASS)
+    gnss.select_systems(SatelliteSystems::new(GpsFamily::GPS, Secondary::Glonass))
         .expect("select satellite systems");
     gnss.set_operation(OperationMode::Normal, 1000)
         .expect("set positioning cycle");

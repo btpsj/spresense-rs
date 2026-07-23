@@ -13,18 +13,23 @@
 //! `cxd56_gnss_sv_s.type` is [`Sv::system`]; `receiver.priv` is
 //! [`Receiver::internal`].
 
-/// Satellite-system selection mask (`CXD56_GNSS_SAT_*`, `gnss.h`).
+/// The GPS-interoperable L1 C/A family — freely combinable.
 ///
-/// Combine with `|`: `SatelliteSystems::GPS | SatelliteSystems::GLONASS`.
-/// The same bit assignment appears in [`Receiver::svtype`] and [`Sv::system`].
+/// GPS, SBAS, QZSS and IMES all share the GPS L1 C/A signal structure, and the
+/// firmware imposes no restriction across them: every one of the 32 subsets is
+/// accepted, alone or beside any [`Secondary`]. Combine with `|`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct SatelliteSystems(u32);
+pub struct GpsFamily(u32);
 
-impl SatelliteSystems {
+impl GpsFamily {
+    /// No L1 C/A signal at all.
+    ///
+    /// Load-bearing, not decoration: it is the only way to ask for a bare
+    /// [`Secondary`] constellation, and the firmware does accept GLONASS-only
+    /// (`0x02`), BeiDou-only (`0x40`) and Galileo-only (`0x80`) masks.
+    pub const NONE: Self = Self(0);
     /// GPS L1 C/A.
     pub const GPS: Self = Self(1 << 0);
-    /// GLONASS L1OF.
-    pub const GLONASS: Self = Self(1 << 1);
     /// SBAS L1 C/A.
     pub const SBAS: Self = Self(1 << 2);
     /// QZSS L1 C/A.
@@ -33,24 +38,106 @@ impl SatelliteSystems {
     pub const IMES: Self = Self(1 << 4);
     /// QZSS L1S.
     pub const QZSS_L1S: Self = Self(1 << 5);
+
+    /// The raw `CXD56_GNSS_SAT_*` bits of this family subset.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// `self | other`, usable in `const` position.
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Does `self` include every signal in `other`?
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
+impl core::ops::BitOr for GpsFamily {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        self.union(rhs)
+    }
+}
+
+impl core::ops::BitOrAssign for GpsFamily {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = self.union(rhs);
+    }
+}
+
+/// The one non-GPS constellation the receiver may track alongside the
+/// [`GpsFamily`] signals.
+///
+/// **Hardware-measured** (`tests/src/bin/gnss_satsys_sweep.rs`, gnssfw
+/// 2.2.20596, 2026-07-23): GLONASS, BeiDou and Galileo are **mutually
+/// exclusive**. `fw_gd_selectsatellitesystem` refuses any mask naming two of
+/// them with `-22`/`EINVAL`; of the 256 possible masks exactly 128 are refused,
+/// and the minimal refused set is precisely the three pairs `GLONASS|BeiDou`
+/// (`0x42`), `GLONASS|Galileo` (`0x82`) and `BeiDou|Galileo` (`0xc0`) — so
+/// every refusal is a mask containing one of them. Each of the three alone is
+/// accepted.
+///
+/// Hence an enum rather than three more flags: the illegal state has no
+/// spelling. NuttX does not validate this (`cxd56_gnss.c:513` forwards the
+/// mask untouched) and neither does the firmware's range check — bits outside
+/// the documented eight are accepted verbatim — so `EINVAL` from
+/// [`Gnss::select_systems`](crate::gnss::Gnss::select_systems) always means
+/// "illegal constellation combination", never "bit out of range".
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Secondary {
+    /// GPS family only — leave the slot empty.
+    None = 0,
+    /// GLONASS L1OF.
+    Glonass = 1 << 1,
     /// BeiDou B1I.
-    pub const BEIDOU: Self = Self(1 << 6);
+    BeiDou = 1 << 6,
     /// Galileo E1B/C.
-    pub const GALILEO: Self = Self(1 << 7);
+    Galileo = 1 << 7,
+}
+
+/// Satellite-system selection mask (`CXD56_GNSS_SAT_*`, `gnss.h`).
+///
+/// Built by [`SatelliteSystems::new`] from a freely-combinable [`GpsFamily`]
+/// subset plus at most one [`Secondary`] constellation — which is exactly what
+/// the firmware permits. There is deliberately **no** `BitOr` here: two masks
+/// cannot be merged, so no sequence of safe calls can name two mutually
+/// exclusive constellations.
+///
+/// The same bit assignment appears in [`Receiver::svtype`] and [`Sv::system`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SatelliteSystems(u32);
+
+impl SatelliteSystems {
+    /// The systems to position with: any L1 C/A family subset, plus at most
+    /// one [`Secondary`] constellation.
+    ///
+    /// ```ignore
+    /// SatelliteSystems::new(GpsFamily::GPS | GpsFamily::QZSS_L1CA, Secondary::Glonass)
+    /// SatelliteSystems::new(GpsFamily::GPS, Secondary::None)   // GPS alone
+    /// SatelliteSystems::new(GpsFamily::NONE, Secondary::BeiDou) // BeiDou alone
+    /// ```
+    pub const fn new(family: GpsFamily, secondary: Secondary) -> Self {
+        Self(family.bits() | secondary as u32)
+    }
 
     /// The raw `CXD56_GNSS_SAT_*` bitmask.
     pub const fn bits(self) -> u32 {
         self.0
     }
 
-    /// Reconstruct from a raw firmware bitmask.
+    /// Reconstruct from a raw firmware bitmask, **unvalidated**.
+    ///
+    /// The escape hatch out of the type-level rule described on [`Secondary`]:
+    /// it will happily build a mask the firmware refuses. That is deliberate —
+    /// [`Gnss::systems`](crate::gnss::Gnss::systems) decodes firmware
+    /// read-backs through it, and `gnss_satsys_sweep` probes illegal masks with
+    /// it on purpose. Prefer [`new`](Self::new) everywhere else.
     pub const fn from_bits(bits: u32) -> Self {
         Self(bits)
-    }
-
-    /// `self | other`, usable in `const` position.
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
     }
 
     /// Does `self` include every system in `other`?
@@ -59,18 +146,31 @@ impl SatelliteSystems {
     }
 }
 
-impl core::ops::BitOr for SatelliteSystems {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self {
-        self.union(rhs)
-    }
-}
+// Mask-encoding pins. [`GpsFamily`]'s consts and [`Secondary`]'s discriminants
+// must keep matching `CXD56_GNSS_SAT_*` (`gnss_type.h:53-61`), and the two
+// groups must stay disjoint — `new` fuses them with a bare OR, so an overlap
+// would silently alias two systems onto one bit.
+const _: () = {
+    assert!(SatelliteSystems::new(GpsFamily::GPS, Secondary::None).bits() == 0x01);
+    assert!(SatelliteSystems::new(GpsFamily::NONE, Secondary::Glonass).bits() == 0x02);
+    assert!(SatelliteSystems::new(GpsFamily::SBAS, Secondary::None).bits() == 0x04);
+    assert!(SatelliteSystems::new(GpsFamily::QZSS_L1CA, Secondary::None).bits() == 0x08);
+    assert!(SatelliteSystems::new(GpsFamily::IMES, Secondary::None).bits() == 0x10);
+    assert!(SatelliteSystems::new(GpsFamily::QZSS_L1S, Secondary::None).bits() == 0x20);
+    assert!(SatelliteSystems::new(GpsFamily::NONE, Secondary::BeiDou).bits() == 0x40);
+    assert!(SatelliteSystems::new(GpsFamily::NONE, Secondary::Galileo).bits() == 0x80);
 
-impl core::ops::BitOrAssign for SatelliteSystems {
-    fn bitor_assign(&mut self, rhs: Self) {
-        *self = self.union(rhs);
-    }
-}
+    // The whole family plus each secondary: the three maximal masks the sweep
+    // measured as accepted (`tests/src/bin/gnss_satsys_sweep.rs`).
+    let all = GpsFamily::GPS
+        .union(GpsFamily::SBAS)
+        .union(GpsFamily::QZSS_L1CA)
+        .union(GpsFamily::IMES)
+        .union(GpsFamily::QZSS_L1S);
+    assert!(SatelliteSystems::new(all, Secondary::Glonass).bits() == 0x3f);
+    assert!(SatelliteSystems::new(all, Secondary::BeiDou).bits() == 0x7d);
+    assert!(SatelliteSystems::new(all, Secondary::Galileo).bits() == 0xbd);
+};
 
 /// Positioning start mode (`CXD56_GNSS_STMOD_*`, `gnss.h:593`).
 ///
@@ -255,7 +355,7 @@ pub struct Receiver {
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct Sv {
-    /// This satellite's system — [`SatelliteSystems`] bit assignment.
+    /// This satellite's system — a single [`GpsFamily`]/[`Secondary`] bit.
     /// (NuttX field name: `type`.)
     pub system: u16,
     /// Satellite id (PRN).
