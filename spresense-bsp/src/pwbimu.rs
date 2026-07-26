@@ -284,7 +284,8 @@ mod sealed {
 /// time: you cannot read a sample before [`enable`](super::PwbImu::enable), or
 /// configure before [`power_on`](super::PwbImu::power_on). The markers are
 /// zero-sized and carried as [`PhantomData`](core::marker::PhantomData), so they
-/// cost nothing at runtime.
+/// cost nothing at runtime. The state markers use enums instead of structs to
+/// guard construction of the state behind the PwbImu constructor.
 ///
 /// ```text
 ///   new ─▶ Off ─power_on()─▶ Idle ─enable()─▶ Streaming
