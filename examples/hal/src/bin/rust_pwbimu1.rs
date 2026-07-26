@@ -113,7 +113,12 @@ fn main() -> ! {
     let mut imu = match imu.power_on(&mut delay) {
         Ok(imu) => imu,
         Err(e) => {
-            writeln!(uart, "power-on probe failed: {:?} — board not detected", e.source).ok();
+            writeln!(
+                uart,
+                "power-on probe failed: {:?} — board not detected",
+                e.source
+            )
+            .ok();
             fail(&mut led);
         }
     };
